@@ -24,6 +24,12 @@ const TABLES = {
 const DEFAULT_ENTITY_ID = "rec9dv3Aa4hxuNLU6"; // Medaman — agreed default for auto-imports
 
 function readRawBody(req) {
+  if (typeof req.body === "string" && req.body.length > 0) {
+    return Promise.resolve(req.body);
+  }
+  if (Buffer.isBuffer(req.body)) {
+    return Promise.resolve(req.body.toString("utf8"));
+  }
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (chunk) => (data += chunk));
@@ -87,23 +93,25 @@ function checkBasicAuth(req) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Alleen POST wordt ondersteund." });
-    return;
-  }
-
-  const auth = checkBasicAuth(req);
-  if (auth.reason === "not_configured") {
-    res.status(500).json({ error: "BILLTOBOX_USER / BILLTOBOX_PASSWORD ontbreken in de server-omgevingsvariabelen." });
-    return;
-  }
-  if (!auth.ok) {
-    res.setHeader("WWW-Authenticate", 'Basic realm="billtobox-import"');
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
   try {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Alleen POST wordt ondersteund." });
+      return;
+    }
+
+    const auth = checkBasicAuth(req);
+    if (auth.reason === "not_configured") {
+      console.error("billtobox-import: BILLTOBOX_USER/BILLTOBOX_PASSWORD ontbreken als env var.");
+      res.status(500).json({ error: "BILLTOBOX_USER / BILLTOBOX_PASSWORD ontbreken in de server-omgevingsvariabelen." });
+      return;
+    }
+    if (!auth.ok) {
+      console.error("billtobox-import: Basic Auth mismatch.");
+      res.setHeader("WWW-Authenticate", 'Basic realm="billtobox-import"');
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
     const xml = await readRawBody(req);
     if (!xml || typeof xml !== "string" || !xml.includes("<")) {
       res.status(400).json({ error: "Verwachtte een UBL XML-body, kreeg iets anders of leeg." });
@@ -167,6 +175,7 @@ export default async function handler(req, res) {
       invoiceNumber,
     });
   } catch (err) {
+    console.error("billtobox-import crashed:", err);
     res.status(500).json({ error: `Verwerken van UBL-factuur mislukt: ${err.message}` });
   }
 }
