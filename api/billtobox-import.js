@@ -114,7 +114,10 @@ export default async function handler(req, res) {
 
     const xml = await readRawBody(req);
     if (!xml || typeof xml !== "string" || !xml.includes("<")) {
-      res.status(400).json({ error: "Verwachtte een UBL XML-body, kreeg iets anders of leeg." });
+      // Likely Billtobox's "Verbinding testen" button, not a real invoice —
+      // treat as a successful connection check rather than an error.
+      console.log("billtobox-import: lege/niet-XML body ontvangen, behandeld als verbindingstest.");
+      res.status(200).json({ status: "ok", note: "Verbinding werkt. Geen factuurgegevens ontvangen (test-payload)." });
       return;
     }
 
