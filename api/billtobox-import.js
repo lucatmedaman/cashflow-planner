@@ -94,8 +94,8 @@ function checkBasicAuth(req) {
 export default async function handler(req, res) {
   console.log(`billtobox-import: handler invoked, method=${req.method}, content-type=${req.headers["content-type"]}`);
   try {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Alleen POST wordt ondersteund." });
+    if (req.method !== "POST" && req.method !== "PUT") {
+      res.status(405).json({ error: "Alleen POST of PUT wordt ondersteund." });
       return;
     }
 
