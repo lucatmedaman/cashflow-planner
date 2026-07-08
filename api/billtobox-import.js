@@ -9,11 +9,10 @@
 // Both BILLTOBOX_USER/BILLTOBOX_PASSWORD and AIRTABLE_TOKEN must be set as
 // Vercel environment variables (server-side only, never VITE_-prefixed).
 
-export const config = {
-  api: {
-    bodyParser: false, // we need the raw XML body, not Vercel's JSON auto-parse
-  },
-};
+// Note: no `export const config = { api: { bodyParser: false } }` here —
+// that's a Next.js convention and may not be honored (or may conflict with
+// the platform) on this plain Vite + Vercel Functions setup. readRawBody()
+// below handles both cases: an already-parsed req.body, or a raw stream.
 
 const BASE_ID = "appnK89Zxu17tWovZ";
 const TABLES = {
@@ -93,6 +92,7 @@ function checkBasicAuth(req) {
 }
 
 export default async function handler(req, res) {
+  console.log(`billtobox-import: handler invoked, method=${req.method}, content-type=${req.headers["content-type"]}`);
   try {
     if (req.method !== "POST") {
       res.status(405).json({ error: "Alleen POST wordt ondersteund." });
