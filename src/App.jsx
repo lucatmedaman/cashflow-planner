@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Plus, Trash2, Check, Building2, ChevronDown, X, Edit2,
+  Plus, Trash2, Check, Building2, ChevronDown, X, Edit2, Copy,
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
   Download, Upload, Loader2, RefreshCw
 } from "lucide-react";
@@ -166,6 +166,7 @@ function itemFromRecord(r) {
     amount: typeof r.fields.Bedrag === "number" ? r.fields.Bedrag : 0,
     direction: r.fields.Richting === "in" ? "in" : "uit",
     dueDate: r.fields.Datum || todayISO(),
+    invoiceDate: r.fields.Factuurdatum || null,
     recurrence: r.fields.Herhaling || "once",
     endDate: r.fields.Einddatum || null,
     viaPaypal: !!r.fields.ViaPayPal,
@@ -182,6 +183,7 @@ function itemToFields(item) {
     Bedrag: item.amount,
     Richting: item.direction,
     Datum: item.dueDate,
+    Factuurdatum: item.invoiceDate || null,
     Herhaling: item.recurrence,
     Einddatum: item.endDate || null,
     ViaPayPal: !!item.viaPaypal,
@@ -210,7 +212,7 @@ export default function CashflowPlanner() {
   const [showEntityModal, setShowEntityModal] = useState(false);
   const [newEntityName, setNewEntityName] = useState("");
   const [showPaidHistory, setShowPaidHistory] = useState(false);
-  const [showOverdue, setShowOverdue] = useState(true);
+  const [showOverdue, setShowOverdue] = useState(false);
 
   const emptyForm = {
     entityId: "",
@@ -221,6 +223,7 @@ export default function CashflowPlanner() {
     amount: "",
     direction: "uit",
     dueDate: todayISO(),
+    invoiceDate: "",
     recurrence: "once",
     endDate: "",
     viaPaypal: false,
@@ -479,13 +482,42 @@ export default function CashflowPlanner() {
     return { inSum, uitSum, net: inSum - uitSum };
   }, [windowFutureRows]);
 
-  // ---- report data: per entity totals + daily net series ----
-  const reportEntities = activeEntity === "all" ? sortedEntities : sortedEntities.filter((e) => e.id === activeEntity);
+  // Entity-independent version, used by the Report tab so switching Planning
+  // tabs never hides a boekhouding from the report overview.
+  const allOccurrenceRows = useMemo(() => {
+    const rows = [];
+    items.forEach((item) => {
+      const occ = generateOccurrences(item, rangeStart, rangeEnd);
+      occ.forEach((o) => {
+        const paid = (item.paidDates || []).includes(o.date);
+        rows.push({ itemId: item.id, date: o.date, paid, item });
+      });
+    });
+    rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return rows;
+  }, [items, rangeStart, rangeEnd]);
+  const allUpcomingRows = allOccurrenceRows.filter((r) => !r.paid && r.date <= rangeEnd);
+
+  // ---- report data: per entity totals + daily net series — ALWAYS all boekhoudingen ----
+  const reportEntities = sortedEntities;
+
+  // All-time payment history — every recorded paidDate on every item, regardless
+  // of the forward-looking window used elsewhere. This is retrospective, not projected.
+  const paymentHistory = useMemo(() => {
+    const rows = [];
+    items.forEach((item) => {
+      (item.paidDates || []).forEach((date) => {
+        rows.push({ date, item });
+      });
+    });
+    rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    return rows;
+  }, [items]);
 
   const reportTotals = useMemo(() => {
     return reportEntities.map((e) => {
       let inSum = 0, uitSum = 0;
-      occurrenceRows
+      allOccurrenceRows
         .filter((r) => r.item.entityId === e.id && !r.paid && r.date >= todayISO())
         .forEach((r) => {
           if (r.item.direction === "in") inSum += Number(r.item.amount);
@@ -493,7 +525,7 @@ export default function CashflowPlanner() {
         });
       return { entity: e, inSum, uitSum, net: inSum - uitSum };
     });
-  }, [reportEntities, occurrenceRows]);
+  }, [reportEntities, allOccurrenceRows]);
 
   const grandTotal = reportTotals.reduce(
     (acc, r) => ({ inSum: acc.inSum + r.inSum, uitSum: acc.uitSum + r.uitSum, net: acc.net + r.net }),
@@ -526,6 +558,15 @@ export default function CashflowPlanner() {
     setShowForm(false);
   }
 
+  // Always-visible entry point (header button) — jumps to Planning, where the
+  // new-item form actually lives, and opens it.
+  function openNewItemForm() {
+    setView("planning");
+    setEditingId(null);
+    setShowForm(true);
+    setForm({ ...emptyForm, entityId: activeEntity !== "all" ? activeEntity : sortedEntities[0]?.id || "" });
+  }
+
   async function submitForm(e) {
     e.preventDefault();
     if (!form.entityId || !form.description.trim() || !form.amount || !form.dueDate) return;
@@ -540,6 +581,7 @@ export default function CashflowPlanner() {
         amount: Math.abs(Number(form.amount)),
         direction: form.direction,
         dueDate: form.dueDate,
+        invoiceDate: form.invoiceDate || null,
         recurrence: form.recurrence,
         endDate: form.recurrence !== "once" && form.endDate ? form.endDate : null,
         viaPaypal: !!form.viaPaypal,
@@ -572,6 +614,7 @@ export default function CashflowPlanner() {
       amount: String(item.amount),
       direction: item.direction,
       dueDate: item.dueDate,
+      invoiceDate: item.invoiceDate || "",
       recurrence: item.recurrence,
       endDate: item.endDate || "",
       viaPaypal: !!item.viaPaypal,
@@ -581,11 +624,27 @@ export default function CashflowPlanner() {
   }
 
   async function deleteItem(id) {
+    const item = items.find((i) => i.id === id);
+    const label = item?.description || "deze post";
+    if (!window.confirm(`"${label}" verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
     setItems((prev) => prev.filter((i) => i.id !== id));
     if (editingId === id) resetForm();
     try {
       await atDelete(TABLES.items, [id]);
       markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  async function duplicateItem(item) {
+    try {
+      const fields = itemToFields({ ...item, paidDates: [] });
+      const [rec] = await atCreate(TABLES.items, [{ fields }]);
+      const created = itemFromRecord(rec);
+      setItems((prev) => [...prev, created]);
+      markSynced();
+      startEdit(created);
     } catch (err) {
       setAirtableError(err.message);
     }
@@ -687,7 +746,7 @@ export default function CashflowPlanner() {
   // occurrence (overdue + future) in chronological order.
   const runningBalances = useMemo(() => {
     const perEntity = sortedEntities.map((e) => {
-      const rows = upcomingRows
+      const rows = allUpcomingRows
         .filter((r) => r.item.entityId === e.id)
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       let balance = e.openingBalance || 0;
@@ -699,7 +758,7 @@ export default function CashflowPlanner() {
       return { entity: e, opening: e.openingBalance || 0, ledger, ending: balance };
     });
 
-    const combinedRows = upcomingRows
+    const combinedRows = allUpcomingRows
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const combinedOpening = entities.reduce((sum, e) => sum + (e.openingBalance || 0), 0);
@@ -711,7 +770,7 @@ export default function CashflowPlanner() {
     });
 
     return { perEntity, combinedOpening, combinedLedger, combinedEnding: combinedBalance };
-  }, [sortedEntities, entities, upcomingRows]);
+  }, [sortedEntities, entities, allUpcomingRows]);
 
   if (loading) {
     return (
@@ -751,6 +810,15 @@ export default function CashflowPlanner() {
                 Crediteuren
               </button>
             </div>
+          </div>
+
+          <div className="mt-3">
+            <button
+              onClick={openNewItemForm}
+              className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" /> Nieuwe post (factuur / inkomst)
+            </button>
           </div>
 
           <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
@@ -862,20 +930,9 @@ export default function CashflowPlanner() {
               </div>
             </div>
 
-            {/* Add button (new items only — inline editing happens per row below) */}
-            <div className="mt-5">
-              {!showForm ? (
-                <button
-                  onClick={() => {
-                    setEditingId(null);
-                    setShowForm(true);
-                    setForm({ ...emptyForm, entityId: activeEntity !== "all" ? activeEntity : sortedEntities[0]?.id || "" });
-                  }}
-                  className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium"
-                >
-                  <Plus className="w-4 h-4" /> Nieuwe post (factuur / inkomst)
-                </button>
-              ) : (
+            {/* New-item form (trigger button now lives in the always-visible header) */}
+            {showForm && (
+              <div className="mt-5">
                 <ItemForm
                   form={form}
                   setForm={setForm}
@@ -885,8 +942,8 @@ export default function CashflowPlanner() {
                   onCancel={resetForm}
                   editing={false}
                 />
-              )}
-            </div>
+              </div>
+            )}
 
             {overdueRows.length > 0 && (
               <div className="mt-4 bg-rose-50 border border-rose-200 rounded-lg p-3">
@@ -905,7 +962,7 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} overdue showDate />
+                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -939,7 +996,7 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} />
+                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -974,7 +1031,7 @@ export default function CashflowPlanner() {
                     <React.Fragment key={`${r.itemId}-${r.date}-paid`}>
                       <ItemRow row={r} entity={entityById[r.item.entityId]}
                         counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                        onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} />
+                        onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} />
                       {editingId === r.itemId && (
                         <ItemForm
                           form={form}
@@ -996,20 +1053,29 @@ export default function CashflowPlanner() {
           <ReportView
             reportTotals={reportTotals}
             grandTotal={grandTotal}
-            showGrand={activeEntity === "all"}
+            showGrand={reportEntities.length > 1}
             entities={reportEntities}
             runningBalances={runningBalances}
             counterpartyById={counterpartyById}
+            paymentHistory={paymentHistory}
+            entityById={entityById}
           />
         ) : (
           <CounterpartyView
             items={items}
             counterparties={counterparties}
+            entities={sortedEntities}
             entityById={entityById}
             filteredEntityIds={filteredEntityIds}
             onTogglePaid={togglePaid}
             onEdit={startEdit}
             onDelete={deleteItem}
+            onDuplicate={duplicateItem}
+            editingId={editingId}
+            form={form}
+            setForm={setForm}
+            onSubmit={submitForm}
+            onCancel={resetForm}
           />
         )}
       </div>
@@ -1132,7 +1198,7 @@ function SummaryCard({ label, value, tone }) {
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, overdue, showDate }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
   return (
@@ -1161,8 +1227,10 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, ov
           {row.item.description}
           {counterparty && <span className="text-slate-400 font-normal"> — {counterparty.name}</span>}
         </p>
-        {(row.item.accountNumber || row.item.note) && (
+        {(row.item.accountNumber || row.item.note || row.item.invoiceDate) && (
           <p className="text-[11px] text-slate-400 truncate">
+            {row.item.invoiceDate && <span>Fact.: {row.item.invoiceDate}</span>}
+            {row.item.invoiceDate && (row.item.accountNumber || row.item.note) && " · "}
             {row.item.accountNumber && <span className="font-mono">{row.item.accountNumber}</span>}
             {row.item.accountNumber && row.item.note && " · "}
             {row.item.note}
@@ -1179,6 +1247,9 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, ov
       <div className="flex items-center gap-0.5 shrink-0">
         <button onClick={() => onEdit(row.item)} className="p-1 text-slate-300 hover:text-slate-600">
           <Edit2 className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={() => onDuplicate(row.item)} className="p-1 text-slate-300 hover:text-slate-600" title="Dupliceren">
+          <Copy className="w-3.5 h-3.5" />
         </button>
         <button onClick={() => onDelete(row.itemId)} className="p-1 text-slate-300 hover:text-rose-500">
           <Trash2 className="w-3.5 h-3.5" />
@@ -1273,7 +1344,16 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-[11px] text-slate-400">Datum</label>
+          <label className="text-[11px] text-slate-400">Factuurdatum (optioneel)</label>
+          <input
+            type="date"
+            value={form.invoiceDate}
+            onChange={(e) => setForm({ ...form, invoiceDate: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate-400">Vervaldatum</label>
           <input
             type="date"
             value={form.dueDate}
@@ -1282,16 +1362,17 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
             required
           />
         </div>
-        <div>
-          <label className="text-[11px] text-slate-400">Herhaling</label>
-          <select
-            value={form.recurrence}
-            onChange={(e) => setForm({ ...form, recurrence: e.target.value })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
-          >
-            {RECURRENCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] text-slate-400">Herhaling</label>
+        <select
+          value={form.recurrence}
+          onChange={(e) => setForm({ ...form, recurrence: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
+        >
+          {RECURRENCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
       </div>
 
       {form.recurrence !== "once" && (
@@ -1313,9 +1394,10 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
   );
 }
 
-function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBalances, counterpartyById }) {
+function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBalances, counterpartyById, paymentHistory, entityById }) {
   const [openLedgers, setOpenLedgers] = useState({});
   const [showCombinedLedger, setShowCombinedLedger] = useState(false);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
 
   function toggleLedger(id) {
     setOpenLedgers((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1329,6 +1411,69 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
 
   return (
     <div className="mt-4 space-y-4">
+      {showGrand && entities.length > 1 && (
+        <div className="bg-slate-900 text-white rounded-xl p-3.5">
+          <p className="text-xs text-slate-300 mb-2">Gezamenlijk totaal</p>
+          <div className="grid grid-cols-3 gap-2 text-sm">
+            <div>
+              <p className="text-[11px] text-slate-400">Te ontvangen</p>
+              <p className="text-emerald-400 font-medium">{eur(grandTotal.inSum)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-400">Te betalen</p>
+              <p className="text-rose-400 font-medium">{eur(grandTotal.uitSum)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-400">Netto</p>
+              <p className="font-medium">{eur(grandTotal.net)}</p>
+            </div>
+          </div>
+
+          {runningBalances && (
+            <div className="mt-3 pt-3 border-t border-slate-700">
+              <div className="flex items-center justify-between text-sm">
+                <div>
+                  <p className="text-[11px] text-slate-400">Startsaldo (vandaag, alle rekeningen)</p>
+                  <p className="font-medium">{eur(runningBalances.combinedOpening)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] text-slate-400">Verwacht totaalsaldo na deze periode</p>
+                  <p className="font-medium">{eur(runningBalances.combinedEnding)}</p>
+                </div>
+              </div>
+              {runningBalances.combinedLedger.length > 0 && (
+                <button
+                  onClick={() => setShowCombinedLedger((s) => !s)}
+                  className="mt-2 text-xs text-slate-400 flex items-center gap-1"
+                >
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCombinedLedger ? "rotate-180" : ""}`} />
+                  Lopend saldo — detail ({runningBalances.combinedLedger.length})
+                </button>
+              )}
+              {showCombinedLedger && (
+                <div className="mt-2 space-y-1">
+                  {runningBalances.combinedLedger.map((row) => {
+                    const cp = row.item.counterpartyId ? counterpartyById[row.item.counterpartyId] : null;
+                    return (
+                      <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-800 last:border-0">
+                        <span className="text-slate-500 shrink-0 w-16">{row.date.slice(5)}</span>
+                        <span className="flex-1 min-w-0 truncate text-slate-300 px-2">
+                          {row.item.description}{cp ? ` — ${cp.name}` : ""}
+                        </span>
+                        <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {row.delta >= 0 ? "+" : ""}{eur(row.delta)}
+                        </span>
+                        <span className="shrink-0 w-24 text-right font-medium">{eur(row.balance)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <p className="text-xs text-slate-400">Openstaande (onbetaalde) posten vanaf vandaag, per boekhouding</p>
       <div className="space-y-2">
         {reportTotals.map(({ entity, inSum, uitSum, net }) => {
@@ -1403,64 +1548,35 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
         })}
       </div>
 
-      {showGrand && entities.length > 1 && (
-        <div className="bg-slate-900 text-white rounded-xl p-3.5">
-          <p className="text-xs text-slate-300 mb-2">Gezamenlijk totaal</p>
-          <div className="grid grid-cols-3 gap-2 text-sm">
-            <div>
-              <p className="text-[11px] text-slate-400">Te ontvangen</p>
-              <p className="text-emerald-400 font-medium">{eur(grandTotal.inSum)}</p>
-            </div>
-            <div>
-              <p className="text-[11px] text-slate-400">Te betalen</p>
-              <p className="text-rose-400 font-medium">{eur(grandTotal.uitSum)}</p>
-            </div>
-            <div>
-              <p className="text-[11px] text-slate-400">Netto</p>
-              <p className="font-medium">{eur(grandTotal.net)}</p>
-            </div>
-          </div>
-
-          {runningBalances && (
-            <div className="mt-3 pt-3 border-t border-slate-700">
-              <div className="flex items-center justify-between text-sm">
-                <div>
-                  <p className="text-[11px] text-slate-400">Startsaldo (vandaag, alle rekeningen)</p>
-                  <p className="font-medium">{eur(runningBalances.combinedOpening)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[11px] text-slate-400">Verwacht totaalsaldo na deze periode</p>
-                  <p className="font-medium">{eur(runningBalances.combinedEnding)}</p>
-                </div>
-              </div>
-              {runningBalances.combinedLedger.length > 0 && (
-                <button
-                  onClick={() => setShowCombinedLedger((s) => !s)}
-                  className="mt-2 text-xs text-slate-400 flex items-center gap-1"
-                >
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCombinedLedger ? "rotate-180" : ""}`} />
-                  Lopend saldo — detail ({runningBalances.combinedLedger.length})
-                </button>
-              )}
-              {showCombinedLedger && (
-                <div className="mt-2 space-y-1">
-                  {runningBalances.combinedLedger.map((row) => {
-                    const cp = row.item.counterpartyId ? counterpartyById[row.item.counterpartyId] : null;
-                    return (
-                      <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-800 last:border-0">
-                        <span className="text-slate-500 shrink-0 w-16">{row.date.slice(5)}</span>
-                        <span className="flex-1 min-w-0 truncate text-slate-300 px-2">
-                          {row.item.description}{cp ? ` — ${cp.name}` : ""}
-                        </span>
-                        <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                          {row.delta >= 0 ? "+" : ""}{eur(row.delta)}
-                        </span>
-                        <span className="shrink-0 w-24 text-right font-medium">{eur(row.balance)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+      {paymentHistory && paymentHistory.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5">
+          <button
+            onClick={() => setShowPaymentHistory((s) => !s)}
+            className="w-full flex items-center justify-between text-sm font-medium text-slate-800"
+          >
+            <span>Alle betalingen ({paymentHistory.length})</span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showPaymentHistory ? "rotate-180" : ""}`} />
+          </button>
+          {showPaymentHistory && (
+            <div className="mt-3 space-y-1 max-h-96 overflow-y-auto">
+              {paymentHistory.map((row, idx) => {
+                const entity = entityById?.[row.item.entityId];
+                const cp = row.item.counterpartyId ? counterpartyById?.[row.item.counterpartyId] : null;
+                const isIn = row.item.direction === "in";
+                return (
+                  <div key={`${row.item.id}-${row.date}-${idx}`} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
+                    <span className="text-slate-400 shrink-0 w-20">{row.date}</span>
+                    <span className="flex-1 min-w-0 truncate px-2">
+                      <span className="text-slate-700">{row.item.description}</span>
+                      {cp && <span className="text-slate-400"> — {cp.name}</span>}
+                      {entity && <span className="text-slate-400"> · {entity.name}</span>}
+                    </span>
+                    <span className={`shrink-0 font-medium ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
+                      {isIn ? "+" : "−"}{eur(row.item.amount)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1469,7 +1585,7 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
   );
 }
 
-function CounterpartyView({ items, counterparties, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete }) {
+function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel }) {
   const [openId, setOpenId] = useState(null);
 
   const scoped = items.filter((it) => filteredEntityIds.includes(it.entityId));
@@ -1526,11 +1642,14 @@ function CounterpartyView({ items, counterparties, entityById, filteredEntityIds
                     const entity = entityById[item.entityId];
                     const c = entityColor(entity);
                     const isIn = item.direction === "in";
-                    const isPaidOnce = item.recurrence === "once" && (item.paidDates || []).includes(item.dueDate);
+                    const paidDates = item.paidDates || [];
+                    const isPaidOnce = item.recurrence === "once" && paidDates.includes(item.dueDate);
+                    const lastPaid = paidDates.length > 0 ? paidDates.slice().sort().slice(-1)[0] : null;
                     return (
-                      <div key={item.id} className="flex items-center gap-2.5 px-3.5 py-2.5">
+                      <React.Fragment key={item.id}>
+                      <div className="flex items-center gap-2.5 px-3.5 py-2.5">
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
                             <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
                             <span className="text-xs text-slate-400">· {item.dueDate}</span>
@@ -1540,12 +1659,33 @@ function CounterpartyView({ items, counterparties, entityById, filteredEntityIds
                                 {RECURRENCE_OPTIONS.find((o) => o.value === item.recurrence)?.label}
                               </span>
                             )}
+                            {item.recurrence === "once" ? (
+                              <button
+                                onClick={() => onTogglePaid(item.id, item.dueDate)}
+                                className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
+                                  isPaidOnce ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                                }`}
+                              >
+                                {isPaidOnce ? "Betaald" : "Openstaand"}
+                              </button>
+                            ) : (
+                              <span
+                                className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
+                                  lastPaid ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                                }`}
+                                title="Herhalende post — dit is een globale indicator, geen status per vervaldatum"
+                              >
+                                {lastPaid ? `Betaald (laatst: ${lastPaid})` : "Nog niet betaald"}
+                              </span>
+                            )}
                           </div>
-                          <p className={`text-sm truncate ${isPaidOnce ? "line-through text-slate-400" : "text-slate-800"}`}>
+                          <p className="text-sm truncate text-slate-800">
                             {item.description}
                           </p>
-                          {(item.accountNumber || item.note) && (
+                          {(item.accountNumber || item.note || item.invoiceDate) && (
                             <p className="text-[11px] text-slate-400 truncate">
+                              {item.invoiceDate && <span>Fact.: {item.invoiceDate}</span>}
+                              {item.invoiceDate && (item.accountNumber || item.note) && " · "}
                               {item.accountNumber && <span className="font-mono">{item.accountNumber}</span>}
                               {item.accountNumber && item.note && " · "}
                               {item.note}
@@ -1559,11 +1699,28 @@ function CounterpartyView({ items, counterparties, entityById, filteredEntityIds
                           <button onClick={() => onEdit(item)} className="p-1 text-slate-300 hover:text-slate-600">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
+                          <button onClick={() => onDuplicate(item)} className="p-1 text-slate-300 hover:text-slate-600" title="Dupliceren">
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={() => onDelete(item.id)} className="p-1 text-slate-300 hover:text-rose-500">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
+                      {editingId === item.id && (
+                        <div className="px-3.5 pb-3.5">
+                          <ItemForm
+                            form={form}
+                            setForm={setForm}
+                            entities={entities}
+                            counterparties={counterparties}
+                            onSubmit={onSubmit}
+                            onCancel={onCancel}
+                            editing
+                          />
+                        </div>
+                      )}
+                      </React.Fragment>
                     );
                   })}
               </div>
