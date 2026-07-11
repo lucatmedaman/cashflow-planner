@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "crons": [
+    { "path": "/api/pocketsmith-sync", "schedule": "0 5 * * *" }
+  ]
+}
