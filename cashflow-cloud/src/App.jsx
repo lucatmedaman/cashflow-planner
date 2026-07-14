@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -204,6 +204,21 @@ function effectiveBalance(entity) {
   return entity.bankBalance !== null && entity.bankBalance !== undefined
     ? entity.bankBalance
     : entity.openingBalance || 0;
+}
+
+// Elke bezetting (occurrence) komt uit generateOccurrences op basis van de
+// vervaldatum (nodig voor correcte herhaling-generatie). Voor weergave-volgorde
+// en het saldoverloop verschuiven we die datum naar de betaaldatum — het
+// aantal dagen verschil tussen betaaldatum en vervaldatum van de post zelf,
+// toegepast op elke gegenereerde bezetting (ook toekomstige, bij herhalende
+// posten). row.date (de originele vervaldatum-bezetting) blijft ongewijzigd
+// voor betaald-tracking en bank-matching — enkel de weergave/sortering
+// verschuift.
+function projectedPayDate(row) {
+  const item = row.item;
+  const offsetMs = fromISO(item.payDate || item.dueDate) - fromISO(item.dueDate);
+  const offsetDays = Math.round(offsetMs / 86400000);
+  return offsetDays === 0 ? row.date : toISO(addDays(fromISO(row.date), offsetDays));
 }
 
 function colorIdxFromId(id) {
@@ -1011,30 +1026,32 @@ export default function CashflowPlanner() {
       const occ = generateOccurrences(item, rangeStart, rangeEnd);
       occ.forEach((o) => {
         const paid = (item.paidDates || []).includes(o.date);
-        rows.push({ itemId: item.id, date: o.date, paid, item });
+        const row = { itemId: item.id, date: o.date, paid, item };
+        row.displayDate = projectedPayDate(row);
+        rows.push(row);
       });
     });
-    rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    rows.sort((a, b) => (a.displayDate < b.displayDate ? -1 : a.displayDate > b.displayDate ? 1 : 0));
     return rows;
   }, [items, filteredEntityIds, rangeStart, rangeEnd]);
 
-  const upcomingRows = occurrenceRows.filter((r) => !r.paid && r.date <= rangeEnd);
+  const upcomingRows = occurrenceRows.filter((r) => !r.paid && r.displayDate <= rangeEnd);
   const recentPaidRows = occurrenceRows
-    .filter((r) => r.paid && r.date >= toISO(addDays(new Date(), -14)))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .filter((r) => r.paid && r.displayDate >= toISO(addDays(new Date(), -14)))
+    .sort((a, b) => (a.displayDate < b.displayDate ? 1 : -1));
 
   const groupedByDate = useMemo(() => {
     const groups = {};
     upcomingRows.forEach((r) => {
-      if (!groups[r.date]) groups[r.date] = [];
-      groups[r.date].push(r);
+      if (!groups[r.displayDate]) groups[r.displayDate] = [];
+      groups[r.displayDate].push(r);
     });
     return Object.entries(groups).sort(([a], [b]) => (a < b ? -1 : 1));
   }, [upcomingRows]);
 
   // ---- summary numbers (within window, unpaid + today..end only, excludes overdue-before-today for "upcoming" totals) ----
-  const windowFutureRows = upcomingRows.filter((r) => r.date >= todayISO());
-  const overdueRows = upcomingRows.filter((r) => r.date < todayISO());
+  const windowFutureRows = upcomingRows.filter((r) => r.displayDate >= todayISO());
+  const overdueRows = upcomingRows.filter((r) => r.displayDate < todayISO());
 
   const summary = useMemo(() => {
     let inSum = 0, uitSum = 0;
@@ -1333,18 +1350,6 @@ export default function CashflowPlanner() {
   // Opening balance = balance today. Projected forward through every unpaid
   // occurrence (overdue + future) in chronological order.
   const runningBalances = useMemo(() => {
-    // Elke bezetting (occurrence) komt uit generateOccurrences op basis van de
-    // vervaldatum (nodig voor correcte herhaling-generatie). Voor het
-    // saldoverloop verschuiven we die datum naar de betaaldatum — het aantal
-    // dagen verschil tussen betaaldatum en vervaldatum van de post zelf,
-    // toegepast op elke gegenereerde bezetting (ook toekomstige, bij
-    // herhalende posten).
-    function projectedPayDate(row) {
-      const item = row.item;
-      const offsetMs = fromISO(item.payDate || item.dueDate) - fromISO(item.dueDate);
-      const offsetDays = Math.round(offsetMs / 86400000);
-      return offsetDays === 0 ? row.date : toISO(addDays(fromISO(row.date), offsetDays));
-    }
     // Startpunt van de projectie: banksaldo-datum indien bekend, anders vandaag.
     // Alles van vóór dat startpunt telt niet mee — dat is al verrekend in het
     // getoonde saldo zelf.
@@ -1960,7 +1965,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
           <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
-          {showDate && <span className="text-xs text-rose-500 font-medium shrink-0">{formatDateLabel(row.date)}</span>}
+          {showDate && <span className="text-xs text-rose-500 font-medium shrink-0">{formatDateLabel(row.displayDate)}</span>}
           {row.item.recurrence !== "once" && <RotateCcw className="w-3 h-3 text-slate-300 shrink-0" />}
           {row.item.viaPaypal && (
             <span className="text-[10px] font-medium text-[#003087] bg-[#e6ecff] rounded px-1 py-0.5 shrink-0">PayPal</span>
