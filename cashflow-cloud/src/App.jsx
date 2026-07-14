@@ -3104,4 +3104,5 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
       )}
     </div>
   );
-}. 
+}
+
