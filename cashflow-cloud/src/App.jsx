@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.16.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -195,6 +195,16 @@ function resolveMappedName(mapping, captured) {
 // ---------- Airtable <-> local model mapping ----------
 // Airtable record IDs (recXXXXXXXXXXXXXXX) are used directly as our local
 // entity/counterparty/item ids once synced — no separate id-mapping table needed.
+
+// Voor Rapport en Grafiek: gebruik het laatst gekende banksaldo als
+// startpunt van de berekening zodra dat bekend is (via CAMT.053-import of
+// PocketSmith-sync), in plaats van het handmatig ingevoerde Startsaldo.
+// Startsaldo blijft wel gewoon bewaard en bewerkbaar in Boekhoudingen.
+function effectiveBalance(entity) {
+  return entity.bankBalance !== null && entity.bankBalance !== undefined
+    ? entity.bankBalance
+    : entity.openingBalance || 0;
+}
 
 function colorIdxFromId(id) {
   let hash = 0;
@@ -1322,19 +1332,20 @@ export default function CashflowPlanner() {
       const rows = allUpcomingRows
         .filter((r) => r.item.entityId === e.id)
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-      let balance = e.openingBalance || 0;
+      const startBalance = effectiveBalance(e);
+      let balance = startBalance;
       const ledger = rows.map((r) => {
         const delta = r.item.direction === "in" ? Number(r.item.amount) : -Number(r.item.amount);
         balance += delta;
         return { ...r, delta, balance };
       });
-      return { entity: e, opening: e.openingBalance || 0, ledger, ending: balance };
+      return { entity: e, opening: startBalance, ledger, ending: balance };
     });
 
     const combinedRows = allUpcomingRows
       .slice()
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    const combinedOpening = entities.reduce((sum, e) => sum + (e.openingBalance || 0), 0);
+    const combinedOpening = entities.reduce((sum, e) => sum + effectiveBalance(e), 0);
     let combinedBalance = combinedOpening;
     const combinedLedger = combinedRows.map((r) => {
       const delta = r.item.direction === "in" ? Number(r.item.amount) : -Number(r.item.amount);
@@ -2149,7 +2160,7 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
             <div className="mt-3 pt-3 border-t border-slate-700">
               <div className="flex items-center justify-between text-sm">
                 <div>
-                  <p className="text-[11px] text-slate-400">Startsaldo (vandaag, alle rekeningen)</p>
+                  <p className="text-[11px] text-slate-400">Huidig saldo (vandaag, alle rekeningen)</p>
                   <p className="font-medium">{eur(runningBalances.combinedOpening)}</p>
                 </div>
                 <div className="text-right">
@@ -2221,7 +2232,9 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                 <div className="mt-3 pt-3 border-t border-slate-100">
                   <div className="flex items-center justify-between text-sm">
                     <div>
-                      <p className="text-[11px] text-slate-400">Startsaldo (vandaag)</p>
+                      <p className="text-[11px] text-slate-400">
+                        {rb.entity.bankBalance !== null && rb.entity.bankBalance !== undefined ? "Banksaldo (vandaag)" : "Startsaldo (vandaag)"}
+                      </p>
                       <p className="font-medium text-slate-700">{eur(rb.opening)}</p>
                     </div>
                     <div className="text-right">
@@ -2304,12 +2317,13 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
 function ChartView({ runningBalances, activeEntity, entities }) {
   const source =
     activeEntity === "all"
-      ? { ledger: runningBalances?.combinedLedger || [], opening: runningBalances?.combinedOpening || 0, label: "Alle boekhoudingen" }
+      ? { ledger: runningBalances?.combinedLedger || [], opening: runningBalances?.combinedOpening || 0, label: "Alle boekhoudingen", isBank: false }
       : (() => {
           const found = (runningBalances?.perEntity || []).find((b) => b.entity.id === activeEntity);
+          const isBank = found ? found.entity.bankBalance !== null && found.entity.bankBalance !== undefined : false;
           return found
-            ? { ledger: found.ledger, opening: found.opening, label: found.entity.name }
-            : { ledger: [], opening: 0, label: entities.find((e) => e.id === activeEntity)?.name || "" };
+            ? { ledger: found.ledger, opening: found.opening, label: found.entity.name, isBank }
+            : { ledger: [], opening: 0, label: entities.find((e) => e.id === activeEntity)?.name || "", isBank: false };
         })();
 
   const data = useMemo(() => {
@@ -2369,7 +2383,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
         </ResponsiveContainer>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <SummaryCard label="Huidig saldo" value={source.opening} tone="pos" />
+        <SummaryCard label={source.isBank ? "Huidig banksaldo" : "Huidig saldo"} value={source.opening} tone="pos" />
         <SummaryCard label="Verwacht eindsaldo" value={data[data.length - 1]?.saldo ?? source.opening} tone={data[data.length - 1]?.saldo >= 0 ? "pos" : "neg"} />
       </div>
     </div>
