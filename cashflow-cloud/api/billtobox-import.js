@@ -20,7 +20,15 @@ const TABLES = {
   counterparties: "tblvZdFmsLq1zC1mp",
   items: "tblDNUpMUR9glpx4j",
 };
-const DEFAULT_ENTITY_ID = "rec9dv3Aa4hxuNLU6"; // Medaman — agreed default for auto-imports
+// Meerdere Billtobox-accounts kunnen naar dit ene endpoint posten — welke
+// boekhouding het wordt, hangt af van ?entity=... in de URL die je bij elke
+// Billtobox-account afzonderlijk instelt. Zonder ?entity= (de bestaande
+// Medaman-koppeling) blijft alles zoals het was.
+const ENTITY_MAP = {
+  medaman: "rec9dv3Aa4hxuNLU6",
+  drlucbelmans: "rec7WTCJu3DwnB0cL", // Dr. Luc Belmans BV
+};
+const DEFAULT_ENTITY_KEY = "medaman";
 
 function readRawBody(req) {
   if (typeof req.body === "string" && req.body.length > 0) {
@@ -92,7 +100,9 @@ function checkBasicAuth(req) {
 }
 
 export default async function handler(req, res) {
-  console.log(`billtobox-import: handler invoked, method=${req.method}, content-type=${req.headers["content-type"]}`);
+  const entityKey = (req.query?.entity || DEFAULT_ENTITY_KEY).toLowerCase();
+  const targetEntityId = ENTITY_MAP[entityKey] || ENTITY_MAP[DEFAULT_ENTITY_KEY];
+  console.log(`billtobox-import: handler invoked, method=${req.method}, content-type=${req.headers["content-type"]}, entity=${entityKey}`);
   try {
     if (req.method !== "POST" && req.method !== "PUT") {
       res.status(405).json({ error: "Alleen POST of PUT wordt ondersteund." });
@@ -146,7 +156,7 @@ export default async function handler(req, res) {
 
     const fields = {
       Omschrijving: `${supplierName} — factuur ${invoiceNumber}`,
-      Boekhouding: [DEFAULT_ENTITY_ID],
+      Boekhouding: [targetEntityId],
       DebiteurCrediteur: [counterpartyId],
       Rekeningnummer: iban,
       Opmerking: "Automatisch geïmporteerd via Billtobox",
@@ -156,6 +166,7 @@ export default async function handler(req, res) {
       Factuurdatum: issueDate || null,
       Herhaling: "once",
       Bron: "Billtobox",
+      Gelezen: false,
       BetaaldeData: "[]",
     };
 
@@ -172,6 +183,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       status: "ok",
+      entity: entityKey,
       recordId: createData.records[0].id,
       supplier: supplierName,
       amount,

@@ -4,9 +4,14 @@ import {
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
   Download, Upload, Loader2, RefreshCw, Landmark
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // ---------- constants ----------
+
+// Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
+// of je de nieuwste versie effectief live hebt staan.
+const APP_VERSION = "1.15.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -129,6 +134,64 @@ function entityColor(entity) {
   return ENTITY_COLORS[(entity?.colorIdx ?? 0) % ENTITY_COLORS.length];
 }
 
+// Ondersteunt vier matchtypes voor de Naammapping-tabel; "Bevat" (losse
+// substring) blijft het gedrag voor rijen zonder MatchType, zodat bestaande
+// mappings ongewijzigd blijven werken.
+// Ondersteunt vier matchtypes, plus een optionele wildcard (*) in het patroon
+// om een variabel stuk tekst op te vangen en te hergebruiken in de correcte
+// naam (bv. patroon "BRASSERIE DE *" → correcte naam "Brasserie de *").
+// Retourneert null bij geen match, anders { captured } (leeg als geen wildcard).
+// Zet een Patroon (met eventueel * en {*}) om naar een regex.
+// * = variabel stuk, genegeerd. {*} = variabel stuk, behouden als "captured".
+function buildPatternRegex(pattern) {
+  const CAPTURE = "\u0000CAPTURE\u0000";
+  const WILD = "\u0000WILD\u0000";
+  let temp = pattern.split("{*}").join(CAPTURE);
+  temp = temp.split("*").join(WILD);
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = temp.split(new RegExp(`(${CAPTURE}|${WILD})`));
+  let regexStr = "^";
+  let hasCapture = false;
+  for (const part of parts) {
+    if (part === CAPTURE) { regexStr += "(.+?)"; hasCapture = true; }
+    else if (part === WILD) { regexStr += ".+?"; }
+    else regexStr += escapeRegex(part);
+  }
+  return { regex: new RegExp(regexStr + "$", "i"), hasCapture };
+}
+
+function matchNamePattern(name, mapping) {
+  if (!mapping.pattern) return null;
+  const n = name || "";
+  const raw = mapping.pattern;
+
+  if (raw.includes("*")) {
+    const { regex, hasCapture } = buildPatternRegex(raw);
+    const m = n.match(regex);
+    if (!m) return null;
+    return { captured: hasCapture ? m[1] : "" };
+  }
+
+  const nLower = n.toLowerCase();
+  const p = raw.toLowerCase();
+  let matched;
+  switch (mapping.matchType) {
+    case "Begint met": matched = nLower.startsWith(p); break;
+    case "Eindigt met": matched = nLower.endsWith(p); break;
+    case "Exact": matched = nLower === p; break;
+    case "Bevat":
+    default: matched = nLower.includes(p); break;
+  }
+  return matched ? { captured: "" } : null;
+}
+
+function resolveMappedName(mapping, captured) {
+  if (mapping.correctName.includes("*")) {
+    return mapping.correctName.replace("*", captured.trim());
+  }
+  return mapping.correctName;
+}
+
 // ---------- Airtable <-> local model mapping ----------
 // Airtable record IDs (recXXXXXXXXXXXXXXX) are used directly as our local
 // entity/counterparty/item ids once synced — no separate id-mapping table needed.
@@ -147,6 +210,8 @@ function entityFromRecord(r) {
     order: typeof r.fields.Volgorde === "number" ? r.fields.Volgorde : 999,
     iban: (r.fields.IBAN || "").replace(/\s+/g, "").toUpperCase(),
     pocketsmithAccount: r.fields.PocketSmithRekening || "",
+    bankBalance: typeof r.fields.BankSaldo === "number" ? r.fields.BankSaldo : null,
+    bankBalanceDate: r.fields.BankSaldoDatum || null,
     colorIdx: colorIdxFromId(r.id),
   };
 }
@@ -175,6 +240,7 @@ function itemFromRecord(r) {
     source: r.fields.Bron || "Handmatig",
     bankRef: r.fields.BankRef || "",
     bankSnapshot: r.fields.BankSnapshot || "",
+    read: !!r.fields.Gelezen,
     paidDates,
   };
 }
@@ -195,6 +261,7 @@ function itemToFields(item) {
     Bron: item.source || "Handmatig",
     BankRef: item.bankRef || "",
     BankSnapshot: item.bankSnapshot || "",
+    Gelezen: !!item.read,
     BetaaldeData: JSON.stringify(item.paidDates || []),
   };
 }
@@ -216,6 +283,20 @@ function parseCamt053(xmlText) {
   const iban = doc.querySelector("Stmt > Acct > Id > IBAN")?.textContent || null;
   const accountName = doc.querySelector("Stmt > Acct > Nm")?.textContent || null;
 
+  // Eindsaldo (CLBD = closing booked balance) — het officiële banksaldo
+  // volgens dit uittreksel, los van wat wij zelf bijhouden als startsaldo.
+  let closingBalance = null;
+  let closingBalanceDate = null;
+  Array.from(doc.getElementsByTagName("Bal")).forEach((bal) => {
+    const code = bal.querySelector("Tp CdOrPrtry Cd")?.textContent;
+    if (code === "CLBD") {
+      const amt = parseFloat(bal.querySelector(":scope > Amt")?.textContent || "0");
+      const cdtDbt = bal.querySelector(":scope > CdtDbtInd")?.textContent || "CRDT";
+      closingBalance = cdtDbt === "CRDT" ? amt : -amt;
+      closingBalanceDate = bal.querySelector("Dt Dt")?.textContent || null;
+    }
+  });
+
   const entries = Array.from(doc.getElementsByTagName("Ntry")).map((ntry) => {
     const amount = parseFloat(ntry.querySelector(":scope > Amt")?.textContent || "0");
     const cdtDbt = ntry.querySelector(":scope > CdtDbtInd")?.textContent || "DBIT";
@@ -236,7 +317,7 @@ function parseCamt053(xmlText) {
     return { amount, direction, bookingDate, ref, counterpartyName, counterpartyIban, remittance };
   });
 
-  return { iban, accountName, entries };
+  return { iban, accountName, entries, closingBalance, closingBalanceDate };
 }
 
 // ---------- main component ----------
@@ -245,6 +326,7 @@ export default function CashflowPlanner() {
   const [entities, setEntities] = useState([]);
   const [items, setItems] = useState([]);
   const [counterparties, setCounterparties] = useState([]);
+  const [nameMappings, setNameMappings] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [airtableError, setAirtableError] = useState("");
@@ -253,11 +335,17 @@ export default function CashflowPlanner() {
   const [syncToast, setSyncToast] = useState(false);
 
   const [view, setView] = useState("planning"); // planning | rapport
+  const [jumpToCounterpartyId, setJumpToCounterpartyId] = useState(null);
   const [activeEntity, setActiveEntity] = useState("all");
+
+  function goToCounterparty(counterpartyId) {
+    if (!counterpartyId) return;
+    setJumpToCounterpartyId(counterpartyId);
+    setView("crediteuren");
+  }
   const [windowDays, setWindowDays] = useState(60);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [showEntityModal, setShowEntityModal] = useState(false);
   const [newEntityName, setNewEntityName] = useState("");
   const [showPaidHistory, setShowPaidHistory] = useState(false);
   const [showOverdue, setShowOverdue] = useState(false);
@@ -345,15 +433,22 @@ export default function CashflowPlanner() {
   }
 
   async function loadFromAirtable() {
-    const [entRecs, cpRecs, itemRecs] = await Promise.all([
+    const [entRecs, cpRecs, itemRecs, mapRecs] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
+      atListAll(TABLES.nameMappings),
     ]);
     return {
       entities: entRecs.map(entityFromRecord),
       counterparties: cpRecs.map(counterpartyFromRecord),
       items: itemRecs.map(itemFromRecord),
+      nameMappings: mapRecs.map((r) => ({
+        id: r.id,
+        pattern: r.fields.Patroon || "",
+        correctName: r.fields.CorrecteNaam || "",
+        matchType: r.fields.MatchType || "Bevat",
+      })),
     };
   }
 
@@ -381,6 +476,7 @@ export default function CashflowPlanner() {
         setEntities(data.entities);
         setCounterparties(data.counterparties);
         setItems(data.items);
+        setNameMappings(data.nameMappings || []);
         setOfflineMode(false);
         setAirtableError("");
         markSynced();
@@ -412,6 +508,7 @@ export default function CashflowPlanner() {
       setEntities(data.entities);
       setCounterparties(data.counterparties);
       setItems(data.items);
+      setNameMappings(data.nameMappings || []);
       setOfflineMode(false);
       markSynced();
     } catch (err) {
@@ -465,6 +562,7 @@ export default function CashflowPlanner() {
         setEntities(data.entities);
         setCounterparties(data.counterparties);
         setItems(data.items);
+        setNameMappings(data.nameMappings || []);
         markSynced();
         setImportMsg("Geïmporteerd als nieuwe records in Airtable.");
       } catch (err) {
@@ -507,6 +605,36 @@ export default function CashflowPlanner() {
     e.target.value = "";
   }
 
+  const [pocketsmithSyncing, setPocketsmithSyncing] = useState(false);
+  async function triggerPocketsmithSync() {
+    setPocketsmithSyncing(true);
+    setImportMsg("PocketSmith synchroniseren…");
+    try {
+      const res = await fetch("/api/pocketsmith-sync");
+      const data = await res.json();
+      if (!res.ok) {
+        setImportMsg(`PocketSmith-sync mislukt: ${data.error || res.status}`);
+      } else {
+        let msg = `PocketSmith: ${data.matched} gematcht, ${data.created} nieuw, ${data.skipped} overgeslagen, ${data.balancesUpdated ?? 0} saldi bijgewerkt.`;
+        if (data.balanceError) msg += ` Saldi-fout: ${data.balanceError}`;
+        else if ((data.balancesUpdated ?? 0) === 0 && data.pocketsmithAccountNames?.length) {
+          msg += ` PocketSmith-rekeningnamen: ${data.pocketsmithAccountNames.join(", ")}`;
+        }
+        setImportMsg(msg);
+        const reloaded = await loadFromAirtable();
+        setEntities(reloaded.entities);
+        setCounterparties(reloaded.counterparties);
+        setItems(reloaded.items);
+        setNameMappings(reloaded.nameMappings || []);
+        markSynced();
+      }
+    } catch (err) {
+      setImportMsg(`PocketSmith-sync mislukt: ${err.message}`);
+    }
+    setPocketsmithSyncing(false);
+    setTimeout(() => setImportMsg(""), 20000);
+  }
+
   async function confirmBankImport() {
     if (!bankParsed || !bankEntityId) return;
     setBankImporting(true);
@@ -521,8 +649,6 @@ export default function CashflowPlanner() {
       try {
         const alreadyImported = entry.ref && workingItems.some((i) => i.bankRef === entry.ref);
         if (alreadyImported) { skipped++; continue; }
-
-        const snapshot = JSON.stringify(entry);
 
         const candidates = workingItems.filter(
           (i) => i.entityId === bankEntityId && i.direction === entry.direction &&
@@ -545,28 +671,31 @@ export default function CashflowPlanner() {
         }
 
         if (matchedItem) {
+          const snapshot = JSON.stringify({ ...entry, wasCreated: false });
           const newPaidDates = [...(matchedItem.paidDates || []), matchedDate];
           const fields = {
             BetaaldeData: JSON.stringify(newPaidDates),
             Bron: "Bank-import",
             BankRef: entry.ref,
             BankSnapshot: snapshot,
+            Gelezen: false,
           };
           await atUpdate(TABLES.items, [{ id: matchedItem.id, fields }]);
           workingItems = workingItems.map((i) =>
             i.id === matchedItem.id
-              ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: entry.ref, bankSnapshot: snapshot }
+              ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: entry.ref, bankSnapshot: snapshot, read: false }
               : i
           );
           matched++;
         } else {
+          const snapshot = JSON.stringify({ ...entry, wasCreated: true });
           const counterpartyId = entry.counterpartyName ? await resolveCounterpartyId(entry.counterpartyName) : null;
           const fields = itemToFields({
             description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
             entityId: bankEntityId,
             counterpartyId,
             accountNumber: entry.counterpartyIban || "",
-            note: entry.remittance || "",
+            note: [...new Set([entry.counterpartyName, entry.remittance].filter(Boolean))].join(" — "),
             amount: entry.amount,
             direction: entry.direction,
             dueDate: entry.bookingDate,
@@ -585,6 +714,26 @@ export default function CashflowPlanner() {
         }
       } catch (err) {
         errors++;
+      }
+    }
+
+    // Officieel eindsaldo uit het bestand zelf wegschrijven op de boekhouding,
+    // los van de verrichtingen — enkel als het bestand er een bevatte.
+    if (bankParsed.closingBalance !== null) {
+      try {
+        await atUpdate(TABLES.entities, [{
+          id: bankEntityId,
+          fields: { BankSaldo: bankParsed.closingBalance, BankSaldoDatum: bankParsed.closingBalanceDate },
+        }]);
+        setEntities((prev) =>
+          prev.map((e) =>
+            e.id === bankEntityId
+              ? { ...e, bankBalance: bankParsed.closingBalance, bankBalanceDate: bankParsed.closingBalanceDate }
+              : e
+          )
+        );
+      } catch (err) {
+        setAirtableError(err.message);
       }
     }
 
@@ -642,20 +791,130 @@ export default function CashflowPlanner() {
         : snapshot.bookingDate;
 
       const newPaidDates = [...(targetItem.paidDates || []), matchDate];
+      const relinkedSnapshot = JSON.stringify({ ...snapshot, wasCreated: false });
       const fields = {
         BetaaldeData: JSON.stringify(newPaidDates),
         Bron: "Bank-import",
         BankRef: snapshot.ref || "",
-        BankSnapshot: JSON.stringify(snapshot),
+        BankSnapshot: relinkedSnapshot,
+        Gelezen: false,
       };
       await atUpdate(TABLES.items, [{ id: targetItem.id, fields }]);
       setItems((prev) =>
         prev.map((i) =>
           i.id === targetItem.id
-            ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: snapshot.ref || "", bankSnapshot: JSON.stringify(snapshot) }
+            ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: snapshot.ref || "", bankSnapshot: relinkedSnapshot, read: false }
             : i
         )
       );
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  async function markRead(id, read) {
+    try {
+      await atUpdate(TABLES.items, [{ id, fields: { Gelezen: read } }]);
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, read } : i)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  // Toegepast op ALLE bestaande crediteuren, niet enkel nieuwe: elke naam die
+  // een Patroon uit de Naammapping-tabel bevat (hoofdletterongevoelig, losse
+  // substring) wordt hernoemd naar CorrecteNaam. Bestaat er al een crediteur
+  // met die correcte naam, dan worden alle posten van de foute variant
+  // verhuisd naar die bestaande crediteur, en wordt de foute verwijderd
+  // (samenvoegen i.p.v. dubbele crediteuren laten bestaan).
+  async function applyNameMappings() {
+    if (nameMappings.length === 0) return { renamed: 0, merged: 0 };
+    let renamed = 0, merged = 0;
+    let workingCounterparties = counterparties;
+    let workingItems = items;
+
+    for (const cp of workingCounterparties) {
+      let mapping = null, matchResult = null;
+      for (const m of nameMappings) {
+        const result = matchNamePattern(cp.name, m);
+        if (result) { mapping = m; matchResult = result; break; }
+      }
+      if (!mapping || !mapping.correctName) continue;
+      const target = resolveMappedName(mapping, matchResult.captured).trim();
+      if (!target || target.toLowerCase() === cp.name.trim().toLowerCase()) continue;
+
+      try {
+        const existingTarget = workingCounterparties.find(
+          (c) => c.id !== cp.id && c.name.trim().toLowerCase() === target.toLowerCase()
+        );
+
+        if (existingTarget) {
+          const affectedItems = workingItems.filter((i) => i.counterpartyId === cp.id);
+          for (const it of affectedItems) {
+            await atUpdate(TABLES.items, [{ id: it.id, fields: { DebiteurCrediteur: [existingTarget.id] } }]);
+          }
+          await atDelete(TABLES.counterparties, [cp.id]);
+          workingItems = workingItems.map((i) =>
+            i.counterpartyId === cp.id ? { ...i, counterpartyId: existingTarget.id } : i
+          );
+          workingCounterparties = workingCounterparties.filter((c) => c.id !== cp.id);
+          merged++;
+        } else {
+          await atUpdate(TABLES.counterparties, [{ id: cp.id, fields: { Naam: target } }]);
+          workingCounterparties = workingCounterparties.map((c) =>
+            c.id === cp.id ? { ...c, name: target } : c
+          );
+          renamed++;
+        }
+      } catch (err) {
+        setAirtableError(err.message);
+      }
+    }
+
+    setCounterparties(workingCounterparties);
+    setItems(workingItems);
+    if (renamed || merged) markSynced();
+    return { renamed, merged };
+  }
+
+  async function addNameMapping(pattern, correctName, matchType) {
+    const p = pattern.trim();
+    const c = correctName.trim();
+    if (!p || !c) return;
+    try {
+      const [rec] = await atCreate(TABLES.nameMappings, [{ fields: { Patroon: p, CorrecteNaam: c, MatchType: matchType || "Bevat" } }]);
+      setNameMappings((prev) => [
+        ...prev,
+        { id: rec.id, pattern: rec.fields.Patroon, correctName: rec.fields.CorrecteNaam, matchType: rec.fields.MatchType || "Bevat" },
+      ]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  function updateNameMappingLocal(id, key, value) {
+    setNameMappings((prev) => prev.map((m) => (m.id === id ? { ...m, [key]: value } : m)));
+  }
+  async function commitNameMapping(id) {
+    const mapping = nameMappings.find((m) => m.id === id);
+    if (!mapping) return;
+    try {
+      await atUpdate(TABLES.nameMappings, [{
+        id,
+        fields: { Patroon: mapping.pattern, CorrecteNaam: mapping.correctName, MatchType: mapping.matchType || "Bevat" },
+      }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+  async function deleteNameMapping(id) {
+    try {
+      await atDelete(TABLES.nameMappings, [id]);
+      setNameMappings((prev) => prev.filter((m) => m.id !== id));
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -674,7 +933,56 @@ export default function CashflowPlanner() {
     [entities]
   );
 
+  const unreadCount = useMemo(
+    () => items.filter((i) => (i.source === "Bank-import" || i.source === "Billtobox") && !i.read).length,
+    [items]
+  );
+
+  // Meest recente verrichting per boekhouding, per bron — gebaseerd op de
+  // transactiedatum zelf (bankSnapshot-datum indien bekend, anders de
+  // vervaldatum van de post). Geen apart "laatst gesynchroniseerd"-tijdstip
+  // per item, dus dit is een proxy: "hoe recent is de data", niet letterlijk
+  // "wanneer liep de sync laatst".
+  const lastUpdateByEntity = useMemo(() => {
+    const map = {};
+    items.forEach((item) => {
+      if (item.source !== "Bank-import" && item.source !== "Billtobox") return;
+      let date = item.dueDate;
+      if (item.bankSnapshot) {
+        try {
+          const snap = JSON.parse(item.bankSnapshot);
+          if (snap.bookingDate) date = snap.bookingDate;
+        } catch (e) {}
+      }
+      if (!map[item.entityId]) map[item.entityId] = { bank: null, billtobox: null };
+      const key = item.source === "Bank-import" ? "bank" : "billtobox";
+      if (!map[item.entityId][key] || date > map[item.entityId][key]) {
+        map[item.entityId][key] = date;
+      }
+    });
+    return map;
+  }, [items]);
+
   const filteredEntityIds = activeEntity === "all" ? sortedEntities.map((e) => e.id) : [activeEntity];
+
+  // Voor de A-Z-sprongbalk in de Crediteuren-header: eerste crediteur per
+  // beginletter, enkel onder crediteuren die effectief posten hebben binnen
+  // de actieve boekhouding-filter.
+  const counterpartyLetterIndex = useMemo(() => {
+    const withItems = new Set(
+      items.filter((it) => it.counterpartyId && filteredEntityIds.includes(it.entityId)).map((it) => it.counterpartyId)
+    );
+    const relevant = counterparties
+      .filter((c) => withItems.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const map = {};
+    for (const c of relevant) {
+      const first = c.name.trim().charAt(0).toUpperCase();
+      const key = /[A-Z]/.test(first) ? first : "#";
+      if (!map[key]) map[key] = c.id;
+    }
+    return map;
+  }, [items, counterparties, filteredEntityIds]);
 
   // ---- occurrence list for planning window ----
   // Lookback is intentionally far in the past: an unpaid invoice must stay visible
@@ -917,7 +1225,6 @@ export default function CashflowPlanner() {
       const created = entityFromRecord(rec);
       setEntities((prev) => [...prev, created]);
       setNewEntityName("");
-      setShowEntityModal(false);
       setActiveEntity(created.id);
       markSynced();
     } catch (err) {
@@ -1053,10 +1360,15 @@ export default function CashflowPlanner() {
         <header className="pt-6 pb-4 sticky top-0 bg-slate-50/95 backdrop-blur z-20">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cashflow</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-slate-900 flex items-center gap-2">
+                Cashflow
+                <span className="text-[11px] font-mono font-medium text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">
+                  v{APP_VERSION}
+                </span>
+              </h1>
               <p className="text-xs text-slate-500 mt-0.5">Te betalen &amp; te ontvangen, per boekhouding</p>
             </div>
-            <div className="flex bg-white border border-slate-200 rounded-full p-0.5 text-sm">
+            <div className="flex bg-white border border-slate-200 rounded-full p-0.5 text-sm overflow-x-auto max-w-full">
               <button
                 onClick={() => setView("planning")}
                 className={`px-3 py-1.5 rounded-full transition ${view === "planning" ? "bg-slate-900 text-white" : "text-slate-500"}`}
@@ -1070,6 +1382,12 @@ export default function CashflowPlanner() {
                 Rapport
               </button>
               <button
+                onClick={() => setView("grafiek")}
+                className={`px-3 py-1.5 rounded-full transition ${view === "grafiek" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                Grafiek
+              </button>
+              <button
                 onClick={() => setView("crediteuren")}
                 className={`px-3 py-1.5 rounded-full transition ${view === "crediteuren" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
@@ -1079,7 +1397,13 @@ export default function CashflowPlanner() {
                 onClick={() => setView("afpunten")}
                 className={`px-3 py-1.5 rounded-full transition ${view === "afpunten" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
-                Afpunten
+                Afpunten{unreadCount > 0 ? ` (${unreadCount})` : ""}
+              </button>
+              <button
+                onClick={() => setView("boekhoudingen")}
+                className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                Boekhoudingen
               </button>
             </div>
           </div>
@@ -1123,6 +1447,15 @@ export default function CashflowPlanner() {
               title="CAMT.053 bankuittreksel inlezen en matchen"
             >
               <Landmark className="w-3.5 h-3.5" /> Bank importeren
+            </button>
+            <button
+              onClick={triggerPocketsmithSync}
+              disabled={pocketsmithSyncing}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+              title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
+            >
+              {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              PocketSmith syncen
             </button>
             {(airtableError || offlineMode) && (
               <button
@@ -1175,12 +1508,32 @@ export default function CashflowPlanner() {
               );
             })}
             <button
-              onClick={() => setShowEntityModal(true)}
+              onClick={() => setView("boekhoudingen")}
               className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-dashed border-slate-300 text-slate-400 flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" /> Boekhouding
             </button>
           </div>
+
+          {view === "crediteuren" && (
+            <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1.5 mt-2">
+              {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
+                const targetId = counterpartyLetterIndex[letter];
+                return (
+                  <button
+                    key={letter}
+                    disabled={!targetId}
+                    onClick={() => targetId && setJumpToCounterpartyId(targetId)}
+                    className={`w-6 h-6 text-[11px] rounded flex items-center justify-center ${
+                      targetId ? "text-slate-600 hover:bg-slate-100" : "text-slate-200"
+                    }`}
+                  >
+                    {letter}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </header>
 
         {view === "planning" ? (
@@ -1241,7 +1594,8 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate />
+                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
+                          onCounterpartyClick={goToCounterparty} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -1275,7 +1629,8 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} />
+                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                          onCounterpartyClick={goToCounterparty} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -1310,7 +1665,8 @@ export default function CashflowPlanner() {
                     <React.Fragment key={`${r.itemId}-${r.date}-paid`}>
                       <ItemRow row={r} entity={entityById[r.item.entityId]}
                         counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                        onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} />
+                        onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                        onCounterpartyClick={goToCounterparty} />
                       {editingId === r.itemId && (
                         <ItemForm
                           form={form}
@@ -1339,6 +1695,12 @@ export default function CashflowPlanner() {
             paymentHistory={paymentHistory}
             entityById={entityById}
           />
+        ) : view === "grafiek" ? (
+          <ChartView
+            runningBalances={runningBalances}
+            activeEntity={activeEntity}
+            entities={sortedEntities}
+          />
         ) : view === "crediteuren" ? (
           <CounterpartyView
             items={items}
@@ -1355,14 +1717,38 @@ export default function CashflowPlanner() {
             setForm={setForm}
             onSubmit={submitForm}
             onCancel={resetForm}
+            onApplyMappings={applyNameMappings}
+            nameMappings={nameMappings}
+            onAddMapping={addNameMapping}
+            onUpdateMappingLocal={updateNameMappingLocal}
+            onCommitMapping={commitNameMapping}
+            onDeleteMapping={deleteNameMapping}
+            jumpToCounterpartyId={jumpToCounterpartyId}
+            onJumpHandled={() => setJumpToCounterpartyId(null)}
           />
-        ) : (
+        ) : view === "afpunten" ? (
           <ReconciliationView
             items={items}
             entityById={entityById}
             counterpartyById={counterpartyById}
             filteredEntityIds={filteredEntityIds}
             onRelink={relinkBankEntry}
+            onMarkRead={markRead}
+          />
+        ) : (
+          <BoekhoudingenView
+            entities={sortedEntities}
+            newEntityName={newEntityName}
+            setNewEntityName={setNewEntityName}
+            onAddEntity={addEntity}
+            onMoveEntity={moveEntity}
+            onUpdateOpeningBalanceLocal={updateOpeningBalanceLocal}
+            onCommitOpeningBalance={commitOpeningBalance}
+            onUpdateEntityFieldLocal={updateEntityFieldLocal}
+            onCommitEntityIban={commitEntityIban}
+            onCommitEntityPocketsmith={commitEntityPocketsmith}
+            onRemoveEntity={removeEntity}
+            lastUpdateByEntity={lastUpdateByEntity}
           />
         )}
       </div>
@@ -1494,110 +1880,25 @@ export default function CashflowPlanner() {
         </div>
       )}
 
-      {/* Entity modal */}
-      {showEntityModal && (
-        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-30" onClick={() => setShowEntityModal(false)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-96" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-slate-900 flex items-center gap-2"><Building2 className="w-4 h-4" /> Nieuwe boekhouding</h3>
-              <button onClick={() => setShowEntityModal(false)}><X className="w-4 h-4 text-slate-400" /></button>
-            </div>
-            <input
-              autoFocus
-              value={newEntityName}
-              onChange={(e) => setNewEntityName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addEntity()}
-              placeholder="Naam (bv. O&O, Dr. Luc Belmans BV)"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-slate-400"
-            />
-            <div className="flex gap-2">
-              <button onClick={addEntity} className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium">Toevoegen</button>
-              <button onClick={() => setShowEntityModal(false)} className="px-4 rounded-lg border border-slate-200 text-sm">Annuleer</button>
-            </div>
-            {sortedEntities.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-xs text-slate-400 mb-2">Bestaande boekhoudingen &amp; startsaldo</p>
-                <div className="space-y-2">
-                  {sortedEntities.map((e, idx) => (
-                    <div key={e.id} className="border-b border-slate-50 last:border-0 pb-2 last:pb-0">
-                      <div className="flex items-center justify-between gap-2 text-sm py-1">
-                        <div className="flex flex-col shrink-0 -my-1">
-                          <button
-                            onClick={() => moveEntity(e.id, -1)}
-                            disabled={idx === 0}
-                            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
-                            title="Naar boven"
-                          >
-                            ▲
-                          </button>
-                          <button
-                            onClick={() => moveEntity(e.id, 1)}
-                            disabled={idx === sortedEntities.length - 1}
-                            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
-                            title="Naar onder"
-                          >
-                            ▼
-                          </button>
-                        </div>
-                        <span className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entityColor(e).dot }} />
-                          <span className="truncate">{e.name}</span>
-                        </span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={e.openingBalance ?? 0}
-                          onChange={(ev) => updateOpeningBalanceLocal(e.id, ev.target.value)}
-                          onBlur={() => commitOpeningBalance(e.id)}
-                          className="w-24 border border-slate-200 rounded-md px-2 py-1 text-xs text-right outline-none focus:border-slate-400"
-                          title="Huidig saldo op deze rekening"
-                        />
-                        <button onClick={() => removeEntity(e.id)} className="text-slate-300 hover:text-rose-500 shrink-0">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-1.5 pl-5 mt-0.5">
-                        <input
-                          value={e.iban || ""}
-                          onChange={(ev) => updateEntityFieldLocal(e.id, "iban", ev.target.value)}
-                          onBlur={() => commitEntityIban(e.id)}
-                          placeholder="IBAN (voor bank-import)"
-                          className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1 text-[11px] font-mono outline-none focus:border-slate-400"
-                        />
-                        <input
-                          value={e.pocketsmithAccount || ""}
-                          onChange={(ev) => updateEntityFieldLocal(e.id, "pocketsmithAccount", ev.target.value)}
-                          onBlur={() => commitEntityPocketsmith(e.id)}
-                          placeholder="PocketSmith-rekeningnaam"
-                          className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1 text-[11px] outline-none focus:border-slate-400"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-400 mt-2">Startsaldo = je actuele banksaldo vandaag. Wordt gebruikt voor het lopend saldo in het Rapport. IBAN en PocketSmith-rekening koppelen automatische bank-import aan de juiste boekhouding.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 // ---------- subcomponents ----------
 
-function SummaryCard({ label, value, tone }) {
+function SummaryCard({ label, value, tone, isCount }) {
   const color = tone === "pos" ? "#047857" : "#BE123C";
   return (
     <div className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
       <p className="text-[11px] text-slate-400">{label}</p>
-      <p className="text-sm font-semibold mt-0.5" style={{ color }}>{eur(value)}</p>
+      <p className="text-sm font-semibold mt-0.5" style={{ color: isCount ? "#334155" : color }}>
+        {isCount ? value : eur(value)}
+      </p>
     </div>
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
   return (
@@ -1630,7 +1931,17 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         </div>
         <p className={`text-sm truncate ${row.paid ? "line-through text-slate-400" : "text-slate-800"}`}>
           {row.item.description}
-          {counterparty && <span className="text-slate-400 font-normal"> — {counterparty.name}</span>}
+          {counterparty && (
+            <>
+              {" — "}
+              <button
+                onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
+                className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+              >
+                {counterparty.name}
+              </button>
+            </>
+          )}
         </p>
         {(row.item.accountNumber || row.item.note || row.item.invoiceDate) && (
           <p className="text-[11px] text-slate-400 truncate">
@@ -1990,102 +2301,375 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
   );
 }
 
-function ReconciliationView({ items, entityById, counterpartyById, filteredEntityIds, onRelink }) {
-  const [relinkingId, setRelinkingId] = useState(null);
-  const [targetId, setTargetId] = useState("");
+function ChartView({ runningBalances, activeEntity, entities }) {
+  const source =
+    activeEntity === "all"
+      ? { ledger: runningBalances?.combinedLedger || [], opening: runningBalances?.combinedOpening || 0, label: "Alle boekhoudingen" }
+      : (() => {
+          const found = (runningBalances?.perEntity || []).find((b) => b.entity.id === activeEntity);
+          return found
+            ? { ledger: found.ledger, opening: found.opening, label: found.entity.name }
+            : { ledger: [], opening: 0, label: entities.find((e) => e.id === activeEntity)?.name || "" };
+        })();
 
-  const bankItems = items
-    .filter((i) => i.source === "Bank-import" && filteredEntityIds.includes(i.entityId) && i.bankSnapshot)
-    .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+  const data = useMemo(() => {
+    const byDate = {};
+    source.ledger.forEach((r) => { byDate[r.date] = r.balance; });
+    const dates = Object.keys(byDate).sort();
+    const today = todayISO();
+    const points = dates.map((d) => ({ date: d, saldo: byDate[d] }));
+    if (points.length === 0 || points[0].date > today) {
+      points.unshift({ date: today, saldo: source.opening });
+    }
+    return points;
+  }, [source]);
 
-  if (bankItems.length === 0) {
-    return (
-      <p className="mt-8 text-sm text-slate-400 text-center py-10">
-        Nog geen bank-import om af te punten. Gebruik eerst "Bank importeren" bovenaan.
-      </p>
-    );
+  if (data.length === 0) {
+    return <p className="mt-8 text-sm text-slate-400 text-center py-10">Niets gepland om te tonen.</p>;
   }
 
+  const minSaldo = Math.min(0, ...data.map((d) => d.saldo));
+  const maxSaldo = Math.max(0, ...data.map((d) => d.saldo));
+  const padding = Math.max(50, (maxSaldo - minSaldo) * 0.1);
+
   return (
-    <div className="mt-4 space-y-2">
-      <p className="text-xs text-slate-400">
-        Bank-verrichtingen naast de post waaraan ze gekoppeld werden. Klopt de koppeling niet, herkoppel dan naar de juiste post.
-      </p>
-      {bankItems.map((item) => {
-        let snapshot = null;
-        try {
-          snapshot = JSON.parse(item.bankSnapshot);
-        } catch (e) {}
-        const entity = entityById[item.entityId];
-        const cp = item.counterpartyId ? counterpartyById[item.counterpartyId] : null;
-        const relinking = relinkingId === item.id;
-
-        const candidates = items.filter(
-          (i) => i.id !== item.id && i.entityId === item.entityId && i.direction === item.direction
-        );
-
-        return (
-          <div key={item.id} className="bg-white border border-slate-200 rounded-xl p-3.5">
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Bank zei</p>
-                <p className="text-slate-700">{snapshot?.counterpartyName || snapshot?.remittance || "—"}</p>
-                <p className="text-slate-400">{snapshot?.bookingDate} · {eur(snapshot?.amount || 0)}</p>
-                {snapshot?.remittance && <p className="text-slate-400 truncate mt-0.5">{snapshot.remittance}</p>}
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Gekoppeld aan</p>
-                <p className="text-slate-700 truncate">{item.description}{cp ? ` — ${cp.name}` : ""}</p>
-                <p className="text-slate-400">{entity?.name} · {eur(item.amount)}</p>
-              </div>
-            </div>
-
-            {!relinking ? (
-              <button
-                onClick={() => { setRelinkingId(item.id); setTargetId(""); }}
-                className="mt-2 text-xs text-slate-400 underline decoration-dotted"
-              >
-                Klopt niet — herkoppelen
-              </button>
-            ) : (
-              <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-                <select
-                  value={targetId}
-                  onChange={(e) => setTargetId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-                >
-                  <option value="" disabled>Kies de juiste post…</option>
-                  {candidates.map((c) => (
-                    <option key={c.id} value={c.id}>{c.description} — {eur(c.amount)} ({c.dueDate})</option>
-                  ))}
-                </select>
-                <div className="flex gap-2">
-                  <button
-                    onClick={async () => {
-                      if (!targetId) return;
-                      await onRelink(item, targetId);
-                      setRelinkingId(null);
-                    }}
-                    disabled={!targetId}
-                    className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
-                  >
-                    Bevestig herkoppeling
-                  </button>
-                  <button onClick={() => setRelinkingId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
-                    Annuleer
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+    <div className="mt-4 space-y-3">
+      <p className="text-xs text-slate-400">Verwacht lopend saldo — {source.label}</p>
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5" style={{ height: 320 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 11, fill: "#94A3B8" }}
+              tickFormatter={(d) => d.slice(5)}
+              minTickGap={24}
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: "#94A3B8" }}
+              domain={[minSaldo - padding, maxSaldo + padding]}
+              tickFormatter={(v) => `€${Math.round(v / 1000)}k`}
+              width={44}
+            />
+            <Tooltip
+              formatter={(v) => [eur(v), "Saldo"]}
+              labelFormatter={(d) => d}
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #E2E8F0" }}
+            />
+            <ReferenceLine y={0} stroke="#F43F5E" strokeDasharray="4 4" />
+            <Line
+              type="stepAfter"
+              dataKey="saldo"
+              stroke="#0F172A"
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <SummaryCard label="Huidig saldo" value={source.opening} tone="pos" />
+        <SummaryCard label="Verwacht eindsaldo" value={data[data.length - 1]?.saldo ?? source.opening} tone={data[data.length - 1]?.saldo >= 0 ? "pos" : "neg"} />
+      </div>
     </div>
   );
 }
 
-function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel }) {
-  const [openId, setOpenId] = useState(null);
+function BoekhoudingenView({
+  entities, newEntityName, setNewEntityName, onAddEntity, onMoveEntity,
+  onUpdateOpeningBalanceLocal, onCommitOpeningBalance,
+  onUpdateEntityFieldLocal, onCommitEntityIban, onCommitEntityPocketsmith,
+  onRemoveEntity, lastUpdateByEntity,
+}) {
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <h3 className="font-medium text-slate-900 flex items-center gap-2 mb-3">
+          <Building2 className="w-4 h-4" /> Nieuwe boekhouding
+        </h3>
+        <input
+          value={newEntityName}
+          onChange={(e) => setNewEntityName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onAddEntity()}
+          placeholder="Naam (bv. O&O, Dr. Luc Belmans BV)"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3 outline-none focus:border-slate-400"
+        />
+        <button onClick={onAddEntity} className="w-full bg-slate-900 text-white rounded-lg py-2 text-sm font-medium">
+          Toevoegen
+        </button>
+      </div>
+
+      {entities.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <p className="text-xs text-slate-400 mb-3">Bestaande boekhoudingen &amp; startsaldo</p>
+          <div className="space-y-3">
+            {entities.map((e, idx) => (
+              <div key={e.id} className="border-b border-slate-50 last:border-0 pb-3 last:pb-0">
+                <div className="flex items-center justify-between gap-2 text-sm py-1">
+                  <div className="flex flex-col shrink-0 -my-1">
+                    <button
+                      onClick={() => onMoveEntity(e.id, -1)}
+                      disabled={idx === 0}
+                      className="text-slate-300 hover:text-slate-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
+                      title="Naar boven"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => onMoveEntity(e.id, 1)}
+                      disabled={idx === entities.length - 1}
+                      className="text-slate-300 hover:text-slate-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
+                      title="Naar onder"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  <span className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: entityColor(e).dot }} />
+                    <span className="truncate">{e.name}</span>
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={e.openingBalance ?? 0}
+                    onChange={(ev) => onUpdateOpeningBalanceLocal(e.id, ev.target.value)}
+                    onBlur={() => onCommitOpeningBalance(e.id)}
+                    className="w-24 border border-slate-200 rounded-md px-2 py-1 text-xs text-right outline-none focus:border-slate-400"
+                    title="Huidig saldo op deze rekening"
+                  />
+                  <button onClick={() => onRemoveEntity(e.id)} className="text-slate-300 hover:text-rose-500 shrink-0">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5 pl-5 mt-1">
+                  <input
+                    value={e.iban || ""}
+                    onChange={(ev) => onUpdateEntityFieldLocal(e.id, "iban", ev.target.value)}
+                    onBlur={() => onCommitEntityIban(e.id)}
+                    placeholder="IBAN (voor bank-import)"
+                    className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs font-mono outline-none focus:border-slate-400"
+                  />
+                  <input
+                    value={e.pocketsmithAccount || ""}
+                    onChange={(ev) => onUpdateEntityFieldLocal(e.id, "pocketsmithAccount", ev.target.value)}
+                    onBlur={() => onCommitEntityPocketsmith(e.id)}
+                    placeholder="PocketSmith-rekeningnaam"
+                    className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                  />
+                </div>
+                {(lastUpdateByEntity[e.id]?.bank || lastUpdateByEntity[e.id]?.billtobox) && (
+                  <p className="text-[11px] text-slate-400 pl-5 mt-1.5">
+                    {lastUpdateByEntity[e.id]?.bank && <>Laatste bank: {lastUpdateByEntity[e.id].bank}</>}
+                    {lastUpdateByEntity[e.id]?.bank && lastUpdateByEntity[e.id]?.billtobox && " · "}
+                    {lastUpdateByEntity[e.id]?.billtobox && <>Laatste Billtobox: {lastUpdateByEntity[e.id].billtobox}</>}
+                  </p>
+                )}
+                {(e.iban || e.pocketsmithAccount) && e.bankBalance !== null && (
+                  <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded px-2 py-1 pl-5 mt-1.5 inline-block">
+                    Meest recent banksaldo: {eur(e.bankBalance)}{e.bankBalanceDate ? ` (${e.bankBalanceDate})` : ""}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-3">
+            Startsaldo = je actuele banksaldo vandaag. Wordt gebruikt voor het lopend saldo in het Rapport. IBAN en PocketSmith-rekening koppelen automatische bank-import aan de juiste boekhouding.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReconciliationView({ items, entityById, counterpartyById, filteredEntityIds, onRelink, onMarkRead }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const [relinkingId, setRelinkingId] = useState(null);
+  const [targetId, setTargetId] = useState("");
+  const [onlyUnread, setOnlyUnread] = useState(false);
+
+  const allAutoItems = items
+    .filter((i) => (i.source === "Bank-import" || i.source === "Billtobox") && filteredEntityIds.includes(i.entityId))
+    .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+
+  const autoItems = onlyUnread ? allAutoItems.filter((i) => !i.read) : allAutoItems;
+  const unreadInScope = allAutoItems.filter((i) => !i.read).length;
+
+  if (allAutoItems.length === 0) {
+    return (
+      <p className="mt-8 text-sm text-slate-400 text-center py-10">
+        Nog geen automatisch geïmporteerde posten (Bank-import of Billtobox).
+      </p>
+    );
+  }
+
+  const totalIn = autoItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0);
+  const totalUit = autoItems.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0);
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setOnlyUnread((s) => !s)}
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full border transition ${
+            onlyUnread ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"
+          }`}
+        >
+          Enkel ongelezen{unreadInScope > 0 ? ` (${unreadInScope})` : ""}
+        </button>
+        {autoItems.length > 0 && (
+          <button
+            onClick={() => autoItems.forEach((i) => !i.read && onMarkRead(i.id, true))}
+            className="text-xs text-slate-400 underline decoration-dotted"
+          >
+            Alles gelezen
+          </button>
+        )}
+      </div>
+
+      {autoItems.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-10">Niets ongelezen.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <SummaryCard label="Aantal" value={autoItems.length} tone="pos" isCount />
+            <SummaryCard label="Totaal in" value={totalIn} tone="pos" />
+            <SummaryCard label="Totaal uit" value={totalUit} tone="neg" />
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
+            {autoItems.map((item) => {
+              let snapshot = null;
+              try {
+                snapshot = item.bankSnapshot ? JSON.parse(item.bankSnapshot) : null;
+              } catch (e) {}
+              const entity = entityById[item.entityId];
+              const cp = item.counterpartyId ? counterpartyById[item.counterpartyId] : null;
+              const expanded = expandedId === item.id;
+              const relinking = relinkingId === item.id;
+              const isIn = item.direction === "in";
+
+              const candidates = items.filter(
+                (i) => i.id !== item.id && i.entityId === item.entityId && i.direction === item.direction
+              );
+
+              return (
+                <div key={item.id} className={!item.read ? "bg-amber-50/40" : ""}>
+                  <button
+                    onClick={() => { setExpandedId(expanded ? null : item.id); setRelinkingId(null); }}
+                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left"
+                  >
+                    <span
+                      onClick={(e) => { e.stopPropagation(); onMarkRead(item.id, !item.read); }}
+                      className={`shrink-0 w-4 h-4 rounded-full border flex items-center justify-center ${
+                        item.read ? "border-slate-300" : "bg-amber-400 border-amber-400"
+                      }`}
+                      title={item.read ? "Markeer als ongelezen" : "Markeer als gelezen"}
+                    >
+                      {item.read && <Check className="w-2.5 h-2.5 text-slate-400" />}
+                    </span>
+                    <span className="text-xs text-slate-400 shrink-0 w-16">{item.dueDate}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-slate-800 truncate">{item.description}{cp ? ` — ${cp.name}` : ""}</p>
+                      <p className="text-[11px] text-slate-400 truncate">
+                        {entity?.name} · {item.source === "Billtobox" ? "Billtobox" : "Bank"}
+                      </p>
+                    </div>
+                    <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
+                      {isIn ? "+" : "−"}{eur(item.amount)}
+                    </span>
+                    <ChevronDown className={`w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {expanded && (
+                    <div className="px-3.5 pb-3.5 space-y-2">
+                      <div className="bg-slate-50 rounded-lg p-2.5 text-xs space-y-1">
+                        <p>
+                          <span className="text-slate-400">Status: </span>
+                          {snapshot?.wasCreated === false ? (
+                            <span className="text-emerald-700 font-medium">Gematcht met bestaande post</span>
+                          ) : snapshot?.wasCreated === true ? (
+                            <span className="text-indigo-700 font-medium">Nieuw aangemaakt</span>
+                          ) : (
+                            <span className="text-slate-400">Onbekend (van vóór deze functie)</span>
+                          )}
+                        </p>
+                        <p className="text-slate-400">
+                          {snapshot
+                            ? <>Bank zei: <span className="text-slate-700">{snapshot.counterpartyName || snapshot.remittance || "—"}</span> · {snapshot.bookingDate} · {eur(snapshot.amount || 0)}</>
+                            : "Geen ruwe brongegevens beschikbaar voor deze post."}
+                        </p>
+                        {snapshot?.remittance && snapshot.remittance !== snapshot.counterpartyName && (
+                          <p className="text-slate-400 break-words">Mededeling: {snapshot.remittance}</p>
+                        )}
+                      </div>
+
+                      {!relinking ? (
+                        <button
+                          onClick={() => { setRelinkingId(item.id); setTargetId(""); }}
+                          className="text-xs text-slate-400 underline decoration-dotted"
+                        >
+                          Klopt niet — herkoppelen
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <select
+                            value={targetId}
+                            onChange={(e) => setTargetId(e.target.value)}
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                          >
+                            <option value="" disabled>Kies de juiste post…</option>
+                            {candidates.map((c) => (
+                              <option key={c.id} value={c.id}>{c.description} — {eur(c.amount)} ({c.dueDate})</option>
+                            ))}
+                          </select>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={async () => {
+                                if (!targetId || !snapshot) return;
+                                await onRelink(item, targetId);
+                                setRelinkingId(null);
+                              }}
+                              disabled={!targetId || !snapshot}
+                              className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                            >
+                              Bevestig herkoppeling
+                            </button>
+                            <button onClick={() => setRelinkingId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                              Annuleer
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled }) {
+  const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
+  const [applying, setApplying] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
+  const [showMappings, setShowMappings] = useState(false);
+  const [newPattern, setNewPattern] = useState("");
+  const [newCorrectName, setNewCorrectName] = useState("");
+  const [newMatchType, setNewMatchType] = useState("Bevat");
+
+  useEffect(() => {
+    if (!jumpToCounterpartyId) return;
+    setOpenId(jumpToCounterpartyId);
+    const el = document.getElementById(`crediteur-${jumpToCounterpartyId}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    onJumpHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToCounterpartyId]);
 
   const scoped = items.filter((it) => filteredEntityIds.includes(it.entityId));
 
@@ -2103,19 +2687,144 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
     return { list, zonder };
   }, [scoped, counterparties]);
 
+  const mappingBar = (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">Alle posten per debiteur/crediteur, ongeacht betaalstatus</p>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => setShowMappings((s) => !s)}
+            className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-600"
+          >
+            Naammapping beheren{nameMappings?.length ? ` (${nameMappings.length})` : ""}
+          </button>
+          <button
+            onClick={async () => {
+              setApplying(true);
+              setApplyResult(null);
+              const result = await onApplyMappings();
+              setApplyResult(result);
+              setApplying(false);
+            }}
+            disabled={applying}
+            className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-600 disabled:opacity-40 flex items-center gap-1"
+          >
+            {applying && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Toepassen
+          </button>
+        </div>
+      </div>
+
+      {showMappings && (
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2">
+          {(nameMappings || []).map((m) => (
+            <div key={m.id} className="flex items-center gap-1.5 flex-wrap">
+              <input
+                value={m.pattern}
+                onChange={(e) => onUpdateMappingLocal(m.id, "pattern", e.target.value)}
+                onBlur={() => onCommitMapping(m.id)}
+                placeholder="Patroon"
+                className="flex-1 min-w-[6rem] border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              />
+              <select
+                value={m.matchType || "Bevat"}
+                onChange={(e) => { onUpdateMappingLocal(m.id, "matchType", e.target.value); onCommitMapping(m.id); }}
+                className="shrink-0 border border-slate-200 rounded-md px-1.5 py-1.5 text-[11px] outline-none focus:border-slate-400"
+              >
+                <option value="Bevat">bevat</option>
+                <option value="Begint met">begint met</option>
+                <option value="Eindigt met">eindigt met</option>
+                <option value="Exact">exact</option>
+              </select>
+              <span className="text-slate-300 text-xs shrink-0">→</span>
+              <input
+                value={m.correctName}
+                onChange={(e) => onUpdateMappingLocal(m.id, "correctName", e.target.value)}
+                onBlur={() => onCommitMapping(m.id)}
+                placeholder="Correcte naam"
+                className="flex-1 min-w-[6rem] border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              />
+              <button onClick={() => onDeleteMapping(m.id)} className="text-slate-300 hover:text-rose-500 shrink-0 p-1">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+            <input
+              value={newPattern}
+              onChange={(e) => setNewPattern(e.target.value)}
+              placeholder="Nieuw patroon"
+              className="flex-1 min-w-[6rem] border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            />
+            <select
+              value={newMatchType}
+              onChange={(e) => setNewMatchType(e.target.value)}
+              className="shrink-0 border border-slate-200 rounded-md px-1.5 py-1.5 text-[11px] outline-none focus:border-slate-400"
+            >
+              <option value="Bevat">bevat</option>
+              <option value="Begint met">begint met</option>
+              <option value="Eindigt met">eindigt met</option>
+              <option value="Exact">exact</option>
+            </select>
+            <span className="text-slate-300 text-xs shrink-0">→</span>
+            <input
+              value={newCorrectName}
+              onChange={(e) => setNewCorrectName(e.target.value)}
+              placeholder="Correcte naam"
+              className="flex-1 min-w-[6rem] border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            />
+            <button
+              onClick={async () => {
+                if (!newPattern.trim() || !newCorrectName.trim()) return;
+                await onAddMapping(newPattern, newCorrectName, newMatchType);
+                setNewPattern("");
+                setNewCorrectName("");
+                setNewMatchType("Bevat");
+              }}
+              disabled={!newPattern.trim() || !newCorrectName.trim()}
+              className="shrink-0 bg-slate-900 text-white rounded-md px-2.5 py-1.5 text-xs font-medium disabled:opacity-40"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            "Bevat" herkent het patroon als losse tekst ergens in de naam. "Begint met"/"Eindigt met" kijken enkel aan het begin/einde. "Exact" vereist een volledige overeenkomst. Alles hoofdletterongevoelig.
+            {" "}Gebruik <code className="bg-slate-100 px-1 rounded">*</code> in Patroon voor een variabel stuk dat genegeerd wordt, en <code className="bg-slate-100 px-1 rounded">{"{*}"}</code> voor het variabele stuk dat je wil behouden — zet dat laatste dan ook als <code className="bg-slate-100 px-1 rounded">*</code> in CorrecteNaam. Bv. patroon <code className="bg-slate-100 px-1 rounded">Paiement Debit Mastercard * - * - {"{*}"} - * - * - * Numéro de carte *</code> met correcte naam <code className="bg-slate-100 px-1 rounded">*</code> haalt enkel de handelaarsnaam eruit. De matchtype-keuze wordt genegeerd zodra Patroon een <code className="bg-slate-100 px-1 rounded">*</code> bevat.
+            {" "}Klik daarna "Toepassen" om dit op bestaande crediteuren toe te passen.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
   if (groups.list.length === 0) {
-    return <p className="mt-8 text-sm text-slate-400 text-center py-10">Nog geen posten met een debiteur/crediteur gekoppeld.</p>;
+    return (
+      <div className="mt-4 space-y-2">
+        {mappingBar}
+        {applyResult && (
+          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
+            {applyResult.renamed} hernoemd, {applyResult.merged} samengevoegd.
+          </p>
+        )}
+        <p className="mt-8 text-sm text-slate-400 text-center py-10">Nog geen posten met een debiteur/crediteur gekoppeld.</p>
+      </div>
+    );
   }
 
   return (
     <div className="mt-4 space-y-2">
-      <p className="text-xs text-slate-400">Alle posten per debiteur/crediteur, ongeacht betaalstatus</p>
+      {mappingBar}
+      {applyResult && (
+        <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
+          {applyResult.renamed} hernoemd, {applyResult.merged} samengevoegd.
+        </p>
+      )}
       {groups.list.map(({ counterparty, items: cpItems }) => {
         const totalIn = cpItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0);
         const totalUit = cpItems.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0);
         const open = openId === counterparty.id;
         return (
-          <div key={counterparty.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div key={counterparty.id} id={`crediteur-${counterparty.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             <button
               onClick={() => setOpenId(open ? null : counterparty.id)}
               className="w-full flex items-center justify-between px-3.5 py-3 text-left"
@@ -2144,6 +2853,25 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                     const paidDates = item.paidDates || [];
                     const isPaidOnce = item.recurrence === "once" && paidDates.includes(item.dueDate);
                     const lastPaid = paidDates.length > 0 ? paidDates.slice().sort().slice(-1)[0] : null;
+
+                    // Voor herhalende posten: welke vervaldatum raakt een klik?
+                    // De datum die het dichtst bij vandaag ligt, betaald of niet.
+                    let nearestOccurrenceDate = item.dueDate;
+                    let nearestOccurrencePaid = lastPaid !== null;
+                    if (item.recurrence !== "once") {
+                      const today = todayISO();
+                      const windowStart = toISO(addDays(fromISO(today), -365));
+                      const windowEnd = toISO(addDays(fromISO(today), 365));
+                      const occ = generateOccurrences(item, windowStart, windowEnd);
+                      if (occ.length > 0) {
+                        const sorted = occ.slice().sort(
+                          (a, b) => Math.abs(fromISO(a.date) - fromISO(today)) - Math.abs(fromISO(b.date) - fromISO(today))
+                        );
+                        nearestOccurrenceDate = sorted[0].date;
+                        nearestOccurrencePaid = paidDates.includes(nearestOccurrenceDate);
+                      }
+                    }
+
                     return (
                       <React.Fragment key={item.id}>
                       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
@@ -2168,14 +2896,15 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                                 {isPaidOnce ? "Betaald" : "Openstaand"}
                               </button>
                             ) : (
-                              <span
+                              <button
+                                onClick={() => onTogglePaid(item.id, nearestOccurrenceDate)}
                                 className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
-                                  lastPaid ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                                  nearestOccurrencePaid ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
                                 }`}
-                                title="Herhalende post — dit is een globale indicator, geen status per vervaldatum"
+                                title={`Vinkt ${nearestOccurrenceDate} af (dichtstbijzijnde vervaldatum)`}
                               >
-                                {lastPaid ? `Betaald (laatst: ${lastPaid})` : "Nog niet betaald"}
-                              </span>
+                                {nearestOccurrencePaid ? `Betaald (${nearestOccurrenceDate})` : `Openstaand (${nearestOccurrenceDate})`}
+                              </button>
                             )}
                           </div>
                           <p className="text-sm truncate text-slate-800">
@@ -2228,9 +2957,64 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
         );
       })}
       {groups.zonder.length > 0 && (
-        <p className="text-[11px] text-slate-400 pt-2">
-          {groups.zonder.length} post{groups.zonder.length !== 1 ? "en" : ""} zonder gekoppelde debiteur/crediteur, niet in dit overzicht.
-        </p>
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setOpenId(openId === "__zonder__" ? null : "__zonder__")}
+            className="w-full flex items-center justify-between px-3.5 py-3 text-left"
+          >
+            <div>
+              <p className="text-sm font-medium text-slate-500">Zonder gekoppelde debiteur/crediteur</p>
+              <p className="text-[11px] text-slate-400">{groups.zonder.length} post{groups.zonder.length !== 1 ? "en" : ""}</p>
+            </div>
+            <ChevronDown className={`w-4 h-4 text-slate-300 transition-transform ${openId === "__zonder__" ? "rotate-180" : ""}`} />
+          </button>
+          {openId === "__zonder__" && (
+            <div className="border-t border-slate-100 divide-y divide-slate-50">
+              {groups.zonder.map((item) => {
+                const entity = entityById[item.entityId];
+                const isIn = item.direction === "in";
+                return (
+                  <React.Fragment key={item.id}>
+                  <div className="flex items-center gap-2.5 px-3.5 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
+                        <span className="text-xs text-slate-400">· {item.dueDate}</span>
+                        {item.source === "Bank-import" && (
+                          <span className="text-[10px] font-medium text-teal-600 bg-teal-50 rounded px-1 py-0.5 shrink-0">Bank</span>
+                        )}
+                        {item.source === "Billtobox" && (
+                          <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1 py-0.5 shrink-0">Billtobox</span>
+                        )}
+                      </div>
+                      <p className="text-sm truncate text-slate-800">{item.description}</p>
+                    </div>
+                    <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
+                      {isIn ? "+" : "−"}{eur(item.amount)}
+                    </span>
+                    <button onClick={() => onEdit(item)} className="p-1 text-slate-300 hover:text-slate-600 shrink-0">
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {editingId === item.id && (
+                    <div className="px-3.5 pb-3.5">
+                      <ItemForm
+                        form={form}
+                        setForm={setForm}
+                        entities={entities}
+                        counterparties={counterparties}
+                        onSubmit={onSubmit}
+                        onCancel={onCancel}
+                        editing
+                      />
+                    </div>
+                  )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

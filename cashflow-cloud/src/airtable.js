@@ -6,6 +6,7 @@ export const TABLES = {
   entities: "tblvCShG16EqO56N1", // Boekhoudingen
   counterparties: "tblvZdFmsLq1zC1mp", // Debiteuren_Crediteuren
   items: "tblDNUpMUR9glpx4j", // Posten
+  nameMappings: "tblptA57fvdaF68nL", // Naammapping
 };
 
 const API_ROOT = "/api/airtable";

@@ -19,6 +19,7 @@ const TABLES = {
   entities: "tblvCShG16EqO56N1",
   counterparties: "tblvZdFmsLq1zC1mp",
   items: "tblDNUpMUR9glpx4j",
+  nameMappings: "tblptA57fvdaF68nL",
 };
 
 function airtableHeaders() {
@@ -44,25 +45,39 @@ async function atListAll(tableId) {
   return records;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function airtableFetchWithRetry(url, options, action) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status === 429) {
+      await sleep(1000 * (attempt + 1)); // Airtable: max 5 req/s per base, backoff en probeer opnieuw
+      continue;
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(`Airtable ${action} mislukt: ${JSON.stringify(data)}`);
+    return data;
+  }
+  throw new Error(`Airtable ${action} mislukt: bleef 429 (rate limit) geven na 3 pogingen.`);
+}
+
 async function atCreate(tableId, fields) {
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, {
-    method: "POST",
-    headers: airtableHeaders(),
-    body: JSON.stringify({ records: [{ fields }] }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Airtable aanmaken mislukt: ${JSON.stringify(data)}`);
+  const data = await airtableFetchWithRetry(
+    `https://api.airtable.com/v0/${BASE_ID}/${tableId}`,
+    { method: "POST", headers: airtableHeaders(), body: JSON.stringify({ records: [{ fields }] }) },
+    "aanmaken"
+  );
   return data.records[0];
 }
 
 async function atUpdate(tableId, id, fields) {
-  const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${tableId}`, {
-    method: "PATCH",
-    headers: airtableHeaders(),
-    body: JSON.stringify({ records: [{ id, fields }] }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`Airtable bijwerken mislukt: ${JSON.stringify(data)}`);
+  const data = await airtableFetchWithRetry(
+    `https://api.airtable.com/v0/${BASE_ID}/${tableId}`,
+    { method: "PATCH", headers: airtableHeaders(), body: JSON.stringify({ records: [{ id, fields }] }) },
+    "bijwerken"
+  );
   return data.records[0];
 }
 
@@ -74,6 +89,82 @@ async function resolveCounterpartyId(name, counterpartiesCache) {
   const created = await atCreate(TABLES.counterparties, { Naam: trimmed });
   counterpartiesCache.push(created);
   return created.id;
+}
+
+// Belgische banken plakken bij kaartafrekeningen en soortgelijke verrichtingen
+// Zet een Patroon (met eventueel * en {*}) om naar een regex.
+// * = variabel stuk, genegeerd. {*} = variabel stuk, behouden als "captured".
+function buildPatternRegex(pattern) {
+  const CAPTURE = "\u0000CAPTURE\u0000";
+  const WILD = "\u0000WILD\u0000";
+  let temp = pattern.split("{*}").join(CAPTURE);
+  temp = temp.split("*").join(WILD);
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = temp.split(new RegExp(`(${CAPTURE}|${WILD})`));
+  let regexStr = "^";
+  let hasCapture = false;
+  for (const part of parts) {
+    if (part === CAPTURE) { regexStr += "(.+?)"; hasCapture = true; }
+    else if (part === WILD) { regexStr += ".+?"; }
+    else regexStr += escapeRegex(part);
+  }
+  return { regex: new RegExp(regexStr + "$", "i"), hasCapture };
+}
+
+// vaak gestructureerde metadata achter de naam ("INTERNE REKENING : ...",
+// "BANKREFERENTIE : ...", "VALUTADATUM : ..."). Dit knipt dat weg voor de
+// specifieke patronen die we al zijn tegengekomen — geen universele parser.
+function cleanPayeeText(raw, mappings) {
+  if (!raw) return raw;
+  let s = raw.trim();
+
+  const cardMatch = s.match(/^AFREKENING\s+(VISA|MASTERCARD|BANCONTACT)\s+KREDIETKAART/i);
+  // "Paiement Debit Mastercard 12/07/26 - 9h56 - <merchant> - <postcode> - <city> - <country> Numéro de carte ..."
+  const ingCardMatch = s.match(
+    /^Paiement\s+Debit\s+Mastercard\s+\d{2}\/\d{2}\/\d{2}\s*-\s*\d{1,2}h\d{2}\s*-\s*(.+?)\s*-\s*\d{3,5}\s*-\s*.+?\s*-\s*[A-Za-z]{2,3}\s+Num[ée]ro\s+de\s+carte/i
+  );
+  if (cardMatch) s = `Afrekening ${cardMatch[1].charAt(0)}${cardMatch[1].slice(1).toLowerCase()} kredietkaart`;
+  else if (ingCardMatch) s = ingCardMatch[1].trim();
+  else {
+    // Knip alles vanaf een herkend metadata-label eraf, wat er ook nog voor stond.
+    s = s.replace(/\s+(INTERNE REKENING|UITGAVENSTAAT NUMMER|BANKREFERENTIE|VALUTADATUM)\s*:.*$/i, "").trim();
+    s = s || raw.slice(0, 80);
+  }
+
+  // Tabel-gestuurde mapping (Naammapping in Airtable) — losse substring-match,
+  // hoofdletterongevoelig, eerste treffer wint. Ondersteunt * (variabel,
+  // genegeerd) en {*} (variabel, behouden) in Patroon.
+  if (mappings && mappings.length) {
+    for (const m of mappings) {
+      if (!m.pattern) continue;
+      let captured = null;
+
+      if (m.pattern.includes("*")) {
+        const { regex, hasCapture } = buildPatternRegex(m.pattern);
+        const match = s.match(regex);
+        if (match) captured = hasCapture ? match[1] : "";
+      } else {
+        const n = s.toLowerCase();
+        const p = m.pattern.toLowerCase();
+        let matched;
+        switch (m.matchType) {
+          case "Begint met": matched = n.startsWith(p); break;
+          case "Eindigt met": matched = n.endsWith(p); break;
+          case "Exact": matched = n === p; break;
+          case "Bevat":
+          default: matched = n.includes(p); break;
+        }
+        if (matched) captured = "";
+      }
+
+      if (captured !== null && m.correctName) {
+        s = m.correctName.includes("*") ? m.correctName.replace("*", captured.trim()) : m.correctName;
+        break;
+      }
+    }
+  }
+
+  return s;
 }
 
 function toISODate(d) {
@@ -95,24 +186,44 @@ async function fetchPocketSmithTransactions(startDate, endDate) {
 
   let transactions = [];
   let page = 1;
+  let totalPages = null; // pas gekend na de eerste respons
   while (true) {
     const url = `https://api.pocketsmith.com/v2/users/${me.id}/transactions?start_date=${startDate}&end_date=${endDate}&page=${page}`;
     const res = await fetch(url, { headers: { "X-Developer-Key": key } });
     const data = await res.json();
     if (!res.ok) throw new Error(`PocketSmith transacties ophalen mislukt: ${JSON.stringify(data)}`);
-    transactions = transactions.concat(data);
-    const totalPages = parseInt(res.headers.get("Total-Pages") || "1", 10);
-    if (page >= totalPages || data.length === 0) break;
+    if (Array.isArray(data)) transactions = transactions.concat(data);
+
+    if (totalPages === null) {
+      const total = parseInt(res.headers.get("Total") || "0", 10);
+      const perPage = parseInt(res.headers.get("Per-Page") || "30", 10);
+      totalPages = total > 0 && perPage > 0 ? Math.ceil(total / perPage) : 1;
+    }
+
+    if (page >= totalPages || !Array.isArray(data) || data.length === 0) break;
     page++;
+    if (page > 500) break; // veiligheidsgrens tegen een oneindige lus bij onverwacht API-gedrag
   }
-  return transactions;
+  return { userId: me.id, transactions };
+}
+
+async function fetchPocketSmithAccounts(userId, key) {
+  const res = await fetch(`https://api.pocketsmith.com/v2/users/${userId}/transaction_accounts`, {
+    headers: { "X-Developer-Key": key },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`PocketSmith rekeningen ophalen mislukt: ${JSON.stringify(data)}`);
+  return data;
 }
 
 export default async function handler(req, res) {
   try {
-    // Bescherm dit endpoint — enkel Vercel Cron (met dit geheim) of jijzelf mag het triggeren.
+    // Zacht beveiligd: als er een secret wordt meegegeven (bv. door Cron),
+    // moet die kloppen. Zonder secret (bv. klik op de knop in de app zelf)
+    // mag het door — zelfde vertrouwensmodel als de rest van deze app, die
+    // sowieso geen login heeft.
     const secret = req.headers["x-cron-secret"] || req.query?.secret;
-    if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+    if (secret && process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -121,15 +232,24 @@ export default async function handler(req, res) {
       return;
     }
 
-    const endDate = toISODate(new Date());
-    const startDate = addDays(endDate, -3); // kleine overlap, dedup via BankRef vangt dubbels op
+    // Normaal: laatste 3 dagen (dagelijkse routine). Voor een eenmalige
+    // historische import: geef ?start=YYYY-MM-DD&end=YYYY-MM-DD mee.
+    const endDate = req.query?.end || toISODate(new Date());
+    const startDate = req.query?.start || addDays(endDate, -3); // kleine overlap, dedup via BankRef vangt dubbels op
 
-    const [entities, counterparties, items, transactions] = await Promise.all([
+    const [entities, counterparties, items, nameMappingRecs, txResult] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
+      atListAll(TABLES.nameMappings),
       fetchPocketSmithTransactions(startDate, endDate),
     ]);
+    const { userId, transactions } = txResult;
+    const nameMappings = nameMappingRecs.map((r) => ({
+      pattern: r.fields.Patroon || "",
+      correctName: r.fields.CorrecteNaam || "",
+      matchType: r.fields.MatchType || "Bevat",
+    }));
 
     let matched = 0, created = 0, skipped = 0, errors = 0;
 
@@ -146,7 +266,8 @@ export default async function handler(req, res) {
         const amount = Math.abs(tx.amount);
         const direction = tx.amount < 0 ? "uit" : "in";
         const date = tx.date;
-        const payee = tx.payee || tx.note || "PocketSmith-transactie";
+        const rawPayee = tx.payee || tx.note || "PocketSmith-transactie";
+        const payee = cleanPayeeText(rawPayee, nameMappings);
 
         const candidates = items.filter((i) => {
           const f = i.fields;
@@ -157,31 +278,33 @@ export default async function handler(req, res) {
             Math.abs(itemAmount - amount) < 0.01 && !paidDates.includes(f.Datum);
         });
 
-        const snapshot = JSON.stringify({ ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "" });
-
         if (candidates.length > 0) {
           const target = candidates[0];
+          const snapshot = JSON.stringify({ ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "", wasCreated: false });
           const paidDates = (() => { try { return JSON.parse(target.fields.BetaaldeData || "[]"); } catch (e) { return []; } })();
           const newPaidDates = [...paidDates, target.fields.Datum];
           await atUpdate(TABLES.items, target.id, {
             BetaaldeData: JSON.stringify(newPaidDates),
             Bron: "Bank-import",
+            Gelezen: false,
             BankRef: ref,
             BankSnapshot: snapshot,
           });
           matched++;
         } else {
+          const snapshot = JSON.stringify({ ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "", wasCreated: true });
           const counterpartyId = await resolveCounterpartyId(payee, counterparties);
           await atCreate(TABLES.items, {
             Omschrijving: payee.slice(0, 80),
             Boekhouding: [entity.id],
             DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
-            Opmerking: tx.note || "",
+            Opmerking: rawPayee,
             Bedrag: amount,
             Richting: direction,
             Datum: date,
             Herhaling: "once",
             Bron: "Bank-import",
+            Gelezen: false,
             BankRef: ref,
             BankSnapshot: snapshot,
             BetaaldeData: JSON.stringify([date]),
@@ -193,7 +316,42 @@ export default async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ status: "ok", total: transactions.length, matched, created, skipped, errors });
+    // Rekeningsaldi bijwerken — los van of er nieuwe transacties waren.
+    let balancesUpdated = 0;
+    let balanceError = null;
+    let pocketsmithAccountNames = [];
+    try {
+      const accounts = await fetchPocketSmithAccounts(userId, process.env.POCKETSMITH_API_KEY);
+      pocketsmithAccountNames = accounts.map((a) => a.title || a.name || "(naamloos)");
+      for (const entity of entities) {
+        const accountName = (entity.fields.PocketSmithRekening || "").trim();
+        if (!accountName) continue;
+        const account = accounts.find(
+          (a) => (a.title || a.name || "").trim().toLowerCase() === accountName.toLowerCase()
+        );
+        if (!account || typeof account.current_balance !== "number") continue;
+        await atUpdate(TABLES.entities, entity.id, {
+          BankSaldo: account.current_balance,
+          BankSaldoDatum: account.current_balance_date || toISODate(new Date()),
+        });
+        balancesUpdated++;
+      }
+    } catch (err) {
+      console.error("pocketsmith-sync: saldi bijwerken mislukt:", err);
+      balanceError = err.message;
+    }
+
+    res.status(200).json({
+      status: "ok",
+      total: transactions.length,
+      matched,
+      created,
+      skipped,
+      errors,
+      balancesUpdated,
+      balanceError,
+      pocketsmithAccountNames, // ter controle: exacte namen zoals PocketSmith ze zelf teruggeeft
+    });
   } catch (err) {
     console.error("pocketsmith-sync crashed:", err);
     res.status(500).json({ error: err.message });
