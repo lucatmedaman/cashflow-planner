@@ -70,6 +70,13 @@ async function listCounterparties() {
   return data.records || [];
 }
 
+async function isAlreadyImported(ref) {
+  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}?filterByFormula=${encodeURIComponent(`{BankRef}="${ref}"`)}&maxRecords=1`;
+  const res = await fetch(url, { headers: airtableHeaders() });
+  const data = await res.json();
+  return Array.isArray(data.records) && data.records.length > 0;
+}
+
 async function resolveCounterpartyId(name) {
   const records = await listCounterparties();
   const existing = records.find((r) => (r.fields.Naam || "").toLowerCase() === name.toLowerCase());
@@ -153,6 +160,22 @@ export default async function handler(req, res) {
     const iban = extractTag(payeeAccountBlock, "ID") || "";
 
     const counterpartyId = await resolveCounterpartyId(supplierName);
+    const billtoboxRef = `billtobox-${invoiceNumber}`;
+
+    if (await isAlreadyImported(billtoboxRef)) {
+      res.status(200).json({ status: "skipped", reason: "Al eerder geïmporteerd", ref: billtoboxRef });
+      return;
+    }
+
+    const snapshot = JSON.stringify({
+      ref: billtoboxRef,
+      amount,
+      direction: "uit",
+      bookingDate: dueDate,
+      counterpartyName: supplierName,
+      remittance: `Factuur ${invoiceNumber}`,
+      wasCreated: true,
+    });
 
     const fields = {
       Omschrijving: `${supplierName} — factuur ${invoiceNumber}`,
@@ -167,6 +190,8 @@ export default async function handler(req, res) {
       Herhaling: "once",
       Bron: "Billtobox",
       Gelezen: false,
+      BankRef: billtoboxRef,
+      BankSnapshot: snapshot,
       BetaaldeData: "[]",
     };
 
