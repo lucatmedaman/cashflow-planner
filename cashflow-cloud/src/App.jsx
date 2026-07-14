@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.21.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
