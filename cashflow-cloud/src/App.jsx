@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.16.0";
+const APP_VERSION = "1.17.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -243,6 +243,7 @@ function itemFromRecord(r) {
     amount: typeof r.fields.Bedrag === "number" ? r.fields.Bedrag : 0,
     direction: r.fields.Richting === "in" ? "in" : "uit",
     dueDate: r.fields.Datum || todayISO(),
+    payDate: r.fields.Betaaldatum || r.fields.Datum || todayISO(),
     invoiceDate: r.fields.Factuurdatum || null,
     recurrence: r.fields.Herhaling || "once",
     endDate: r.fields.Einddatum || null,
@@ -264,6 +265,7 @@ function itemToFields(item) {
     Bedrag: item.amount,
     Richting: item.direction,
     Datum: item.dueDate,
+    Betaaldatum: item.payDate || item.dueDate,
     Factuurdatum: item.invoiceDate || null,
     Herhaling: item.recurrence,
     Einddatum: item.endDate || null,
@@ -369,6 +371,7 @@ export default function CashflowPlanner() {
     amount: "",
     direction: "uit",
     dueDate: todayISO(),
+    payDate: todayISO(),
     invoiceDate: "",
     recurrence: "once",
     endDate: "",
@@ -1141,6 +1144,7 @@ export default function CashflowPlanner() {
         amount: Math.abs(Number(form.amount)),
         direction: form.direction,
         dueDate: form.dueDate,
+        payDate: form.payDate || form.dueDate,
         invoiceDate: form.invoiceDate || null,
         recurrence: form.recurrence,
         endDate: form.recurrence !== "once" && form.endDate ? form.endDate : null,
@@ -1174,6 +1178,7 @@ export default function CashflowPlanner() {
       amount: String(item.amount),
       direction: item.direction,
       dueDate: item.dueDate,
+      payDate: item.payDate || item.dueDate,
       invoiceDate: item.invoiceDate || "",
       recurrence: item.recurrence,
       endDate: item.endDate || "",
@@ -1328,9 +1333,32 @@ export default function CashflowPlanner() {
   // Opening balance = balance today. Projected forward through every unpaid
   // occurrence (overdue + future) in chronological order.
   const runningBalances = useMemo(() => {
+    // Elke bezetting (occurrence) komt uit generateOccurrences op basis van de
+    // vervaldatum (nodig voor correcte herhaling-generatie). Voor het
+    // saldoverloop verschuiven we die datum naar de betaaldatum — het aantal
+    // dagen verschil tussen betaaldatum en vervaldatum van de post zelf,
+    // toegepast op elke gegenereerde bezetting (ook toekomstige, bij
+    // herhalende posten).
+    function projectedPayDate(row) {
+      const item = row.item;
+      const offsetMs = fromISO(item.payDate || item.dueDate) - fromISO(item.dueDate);
+      const offsetDays = Math.round(offsetMs / 86400000);
+      return offsetDays === 0 ? row.date : toISO(addDays(fromISO(row.date), offsetDays));
+    }
+    // Startpunt van de projectie: banksaldo-datum indien bekend, anders vandaag.
+    // Alles van vóór dat startpunt telt niet mee — dat is al verrekend in het
+    // getoonde saldo zelf.
+    function startDateFor(entity) {
+      const hasBankBalance = entity.bankBalance !== null && entity.bankBalance !== undefined;
+      return hasBankBalance && entity.bankBalanceDate ? entity.bankBalanceDate : todayISO();
+    }
+
     const perEntity = sortedEntities.map((e) => {
+      const startDate = startDateFor(e);
       const rows = allUpcomingRows
         .filter((r) => r.item.entityId === e.id)
+        .map((r) => ({ ...r, date: projectedPayDate(r) }))
+        .filter((r) => r.date >= startDate)
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       const startBalance = effectiveBalance(e);
       let balance = startBalance;
@@ -1339,11 +1367,15 @@ export default function CashflowPlanner() {
         balance += delta;
         return { ...r, delta, balance };
       });
-      return { entity: e, opening: startBalance, ledger, ending: balance };
+      return { entity: e, opening: startBalance, openingDate: startDate, ledger, ending: balance };
     });
 
+    const entityStartDates = {};
+    sortedEntities.forEach((e) => { entityStartDates[e.id] = startDateFor(e); });
+
     const combinedRows = allUpcomingRows
-      .slice()
+      .map((r) => ({ ...r, date: projectedPayDate(r) }))
+      .filter((r) => r.date >= (entityStartDates[r.item.entityId] || todayISO()))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     const combinedOpening = entities.reduce((sum, e) => sum + effectiveBalance(e), 0);
     let combinedBalance = combinedOpening;
@@ -2084,11 +2116,26 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
           <input
             type="date"
             value={form.dueDate}
-            onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+            onChange={(e) => {
+              const newDue = e.target.value;
+              // Betaaldatum volgt automatisch mee zolang ze nog niet apart is aangepast.
+              setForm((f) => ({ ...f, dueDate: newDue, payDate: f.payDate === f.dueDate ? newDue : f.payDate }));
+            }}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
             required
           />
         </div>
+      </div>
+
+      <div>
+        <label className="text-[11px] text-slate-400">Betaaldatum</label>
+        <input
+          type="date"
+          value={form.payDate}
+          onChange={(e) => setForm({ ...form, payDate: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
+        />
+        <p className="text-[10px] text-slate-400 mt-0.5">Standaard gelijk aan de vervaldatum. Bepaalt het verwachte lopend saldo in Rapport/Grafiek — de vervaldatum blijft leidend voor Planning en herinneringen.</p>
       </div>
 
       <div>
@@ -2233,7 +2280,9 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                   <div className="flex items-center justify-between text-sm">
                     <div>
                       <p className="text-[11px] text-slate-400">
-                        {rb.entity.bankBalance !== null && rb.entity.bankBalance !== undefined ? "Banksaldo (vandaag)" : "Startsaldo (vandaag)"}
+                        {rb.entity.bankBalance !== null && rb.entity.bankBalance !== undefined
+                          ? `Banksaldo (${rb.openingDate})`
+                          : "Startsaldo (vandaag)"}
                       </p>
                       <p className="font-medium text-slate-700">{eur(rb.opening)}</p>
                     </div>
@@ -2317,23 +2366,22 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
 function ChartView({ runningBalances, activeEntity, entities }) {
   const source =
     activeEntity === "all"
-      ? { ledger: runningBalances?.combinedLedger || [], opening: runningBalances?.combinedOpening || 0, label: "Alle boekhoudingen", isBank: false }
+      ? { ledger: runningBalances?.combinedLedger || [], opening: runningBalances?.combinedOpening || 0, label: "Alle boekhoudingen", isBank: false, openingDate: todayISO() }
       : (() => {
           const found = (runningBalances?.perEntity || []).find((b) => b.entity.id === activeEntity);
           const isBank = found ? found.entity.bankBalance !== null && found.entity.bankBalance !== undefined : false;
           return found
-            ? { ledger: found.ledger, opening: found.opening, label: found.entity.name, isBank }
-            : { ledger: [], opening: 0, label: entities.find((e) => e.id === activeEntity)?.name || "", isBank: false };
+            ? { ledger: found.ledger, opening: found.opening, label: found.entity.name, isBank, openingDate: found.openingDate }
+            : { ledger: [], opening: 0, label: entities.find((e) => e.id === activeEntity)?.name || "", isBank: false, openingDate: todayISO() };
         })();
 
   const data = useMemo(() => {
     const byDate = {};
     source.ledger.forEach((r) => { byDate[r.date] = r.balance; });
     const dates = Object.keys(byDate).sort();
-    const today = todayISO();
     const points = dates.map((d) => ({ date: d, saldo: byDate[d] }));
-    if (points.length === 0 || points[0].date > today) {
-      points.unshift({ date: today, saldo: source.opening });
+    if (points.length === 0 || points[0].date > source.openingDate) {
+      points.unshift({ date: source.openingDate, saldo: source.opening });
     }
     return points;
   }, [source]);
