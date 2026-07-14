@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.19.0";
+const APP_VERSION = "1.19.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1031,7 +1031,10 @@ export default function CashflowPlanner() {
         rows.push(row);
       });
     });
-    rows.sort((a, b) => (a.displayDate < b.displayDate ? -1 : a.displayDate > b.displayDate ? 1 : 0));
+    rows.sort((a, b) => {
+      if (a.displayDate !== b.displayDate) return a.displayDate < b.displayDate ? -1 : 1;
+      return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+    });
     return rows;
   }, [items, filteredEntityIds, rangeStart, rangeEnd]);
 
