@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.21.1";
+const APP_VERSION = "1.23.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -835,6 +835,45 @@ export default function CashflowPlanner() {
             : i
         )
       );
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  // Voegt duplicateItem samen met targetItemId: duplicateItem verdwijnt, en
+  // zijn betaalstatus (indien betaald) verhuist naar de dichtstbijzijnde
+  // onbetaalde vervaldatum van de doelpost. Geen bank-brongegevens nodig —
+  // werkt voor elke post, handmatig of automatisch.
+  async function mergeDuplicateItem(duplicateItem, targetItemId) {
+    try {
+      const targetItem = items.find((i) => i.id === targetItemId);
+      if (!targetItem) {
+        setAirtableError("Doelpost niet gevonden.");
+        return;
+      }
+
+      const wasPaid = (duplicateItem.paidDates || []).length > 0;
+      const referenceDate = wasPaid
+        ? duplicateItem.paidDates.slice().sort().slice(-1)[0]
+        : duplicateItem.dueDate;
+
+      if (wasPaid) {
+        const refDateObj = fromISO(referenceDate);
+        const windowStart = toISO(addDays(refDateObj, -10));
+        const windowEnd = toISO(addDays(refDateObj, 10));
+        const occ = generateOccurrences(targetItem, windowStart, windowEnd)
+          .filter((o) => !(targetItem.paidDates || []).includes(o.date));
+        const matchDate = occ.length > 0
+          ? occ.sort((a, b) => Math.abs(fromISO(a.date) - refDateObj) - Math.abs(fromISO(b.date) - refDateObj))[0].date
+          : referenceDate;
+        const newPaidDates = [...(targetItem.paidDates || []), matchDate];
+        await atUpdate(TABLES.items, [{ id: targetItem.id, fields: { BetaaldeData: JSON.stringify(newPaidDates) } }]);
+        setItems((prev) => prev.map((i) => (i.id === targetItem.id ? { ...i, paidDates: newPaidDates } : i)));
+      }
+
+      await atDelete(TABLES.items, [duplicateItem.id]);
+      setItems((prev) => prev.filter((i) => i.id !== duplicateItem.id));
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -1794,6 +1833,7 @@ export default function CashflowPlanner() {
             jumpToCounterpartyId={jumpToCounterpartyId}
             onJumpHandled={() => setJumpToCounterpartyId(null)}
             onRelink={relinkBankEntry}
+            onMerge={mergeDuplicateItem}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -2644,6 +2684,17 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
               try {
                 snapshot = item.bankSnapshot ? JSON.parse(item.bankSnapshot) : null;
               } catch (e) {}
+              if (!snapshot) {
+                snapshot = {
+                  ref: item.bankRef || `manual-${item.id}`,
+                  amount: item.amount,
+                  direction: item.direction,
+                  bookingDate: item.dueDate,
+                  counterpartyName: item.description,
+                  remittance: item.note || "",
+                  wasCreated: null, // onbekend — geen echte snapshot om dit uit af te leiden
+                };
+              }
               const entity = entityById[item.entityId];
               const cp = item.counterpartyId ? counterpartyById[item.counterpartyId] : null;
               const expanded = expandedId === item.id;
@@ -2756,7 +2807,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink }) {
+function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
@@ -3032,15 +3083,13 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                           {isIn ? "+" : "−"}{eur(item.amount)}
                         </p>
                         <div className="flex items-center gap-0.5 shrink-0">
-                          {item.bankSnapshot && (
-                            <button
-                              onClick={() => { setRelinkingId(relinkingId === item.id ? null : item.id); setRelinkTargetId(""); }}
-                              className="p-1 text-slate-300 hover:text-slate-600"
-                              title="Klopt de koppeling niet? Herkoppelen"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => { setRelinkingId(relinkingId === item.id ? null : item.id); setRelinkTargetId(""); }}
+                            className="p-1 text-slate-300 hover:text-slate-600"
+                            title={item.source === "Handmatig" ? "Samenvoegen met een andere post" : "Klopt de koppeling niet? Herkoppelen"}
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
                           <button onClick={() => onEdit(item)} className="p-1 text-slate-300 hover:text-slate-600">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
@@ -3053,17 +3102,33 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                         </div>
                       </div>
                       {relinkingId === item.id && (() => {
+                        const isManual = item.source === "Handmatig";
                         let snapshot = null;
-                        try { snapshot = JSON.parse(item.bankSnapshot); } catch (e) {}
+                        if (!isManual) {
+                          try { snapshot = JSON.parse(item.bankSnapshot); } catch (e) {}
+                          if (!snapshot) {
+                            // Oudere Bank-import/Billtobox-post zonder opgeslagen snapshot —
+                            // gebruik de post z'n eigen huidige gegevens als vervanging.
+                            snapshot = {
+                              ref: item.bankRef || `manual-${item.id}`,
+                              amount: item.amount,
+                              direction: item.direction,
+                              bookingDate: item.dueDate,
+                              counterpartyName: item.description,
+                              remittance: item.note || "",
+                              wasCreated: true,
+                            };
+                          }
+                        }
                         const candidates = items.filter(
                           (i) => i.id !== item.id && i.entityId === item.entityId && i.direction === item.direction
                         );
                         return (
                           <div className="px-3.5 pb-3.5 space-y-2">
                             <p className="text-[11px] text-slate-400">
-                              {snapshot
-                                ? `Bank zei: ${snapshot.counterpartyName || snapshot.remittance || "—"} · ${snapshot.bookingDate} · ${eur(snapshot.amount || 0)}`
-                                : "Geen ruwe brongegevens beschikbaar voor deze post."}
+                              {isManual
+                                ? "Deze post wordt verwijderd; de betaalstatus (indien betaald) verhuist naar de gekozen post."
+                                : `Bank zei: ${snapshot.counterpartyName || snapshot.remittance || "—"} · ${snapshot.bookingDate} · ${eur(snapshot.amount || 0)}`}
                             </p>
                             <select
                               value={relinkTargetId}
@@ -3078,14 +3143,15 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                             <div className="flex gap-2">
                               <button
                                 onClick={async () => {
-                                  if (!relinkTargetId || !snapshot) return;
-                                  await onRelink(item, relinkTargetId);
+                                  if (!relinkTargetId) return;
+                                  if (isManual) await onMerge(item, relinkTargetId);
+                                  else await onRelink(item, relinkTargetId);
                                   setRelinkingId(null);
                                 }}
-                                disabled={!relinkTargetId || !snapshot}
+                                disabled={!relinkTargetId}
                                 className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
                               >
-                                Bevestig herkoppeling
+                                {isManual ? "Bevestig samenvoegen" : "Bevestig herkoppeling"}
                               </button>
                               <button onClick={() => setRelinkingId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
                                 Annuleer
