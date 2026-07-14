@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1986,10 +1986,13 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
             </>
           )}
         </p>
-        {(row.item.accountNumber || row.item.note || row.item.invoiceDate) && (
+        <p className="text-[11px] text-slate-400 truncate">
+          Verval: {row.date}
+          {row.item.payDate && row.item.payDate !== row.item.dueDate && <> · Betaal: {row.item.payDate}</>}
+          {row.item.invoiceDate && <> · Fact.: {row.item.invoiceDate}</>}
+        </p>
+        {(row.item.accountNumber || row.item.note) && (
           <p className="text-[11px] text-slate-400 truncate">
-            {row.item.invoiceDate && <span>Fact.: {row.item.invoiceDate}</span>}
-            {row.item.invoiceDate && (row.item.accountNumber || row.item.note) && " · "}
             {row.item.accountNumber && <span className="font-mono">{row.item.accountNumber}</span>}
             {row.item.accountNumber && row.item.note && " · "}
             {row.item.note}
@@ -2228,11 +2231,16 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                 <div className="mt-2 space-y-1">
                   {runningBalances.combinedLedger.map((row) => {
                     const cp = row.item.counterpartyId ? counterpartyById[row.item.counterpartyId] : null;
+                    const extraDates = [
+                      row.item.dueDate !== row.date ? `verval ${row.item.dueDate}` : null,
+                      row.item.invoiceDate ? `fact. ${row.item.invoiceDate}` : null,
+                    ].filter(Boolean).join(" · ");
                     return (
-                      <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-800 last:border-0">
+                      <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-800 last:border-0" title={extraDates || undefined}>
                         <span className="text-slate-500 shrink-0 w-16">{row.date.slice(5)}</span>
                         <span className="flex-1 min-w-0 truncate text-slate-300 px-2">
                           {row.item.description}{cp ? ` — ${cp.name}` : ""}
+                          {extraDates && <span className="text-slate-500"> ({extraDates})</span>}
                         </span>
                         <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                           {row.delta >= 0 ? "+" : ""}{eur(row.delta)}
@@ -2304,11 +2312,16 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                     <div className="mt-2 space-y-1">
                       {rb.ledger.map((row) => {
                         const cp = row.item.counterpartyId ? counterpartyById[row.item.counterpartyId] : null;
+                        const extraDates = [
+                          row.item.dueDate !== row.date ? `verval ${row.item.dueDate}` : null,
+                          row.item.invoiceDate ? `fact. ${row.item.invoiceDate}` : null,
+                        ].filter(Boolean).join(" · ");
                         return (
-                          <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
+                          <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0" title={extraDates || undefined}>
                             <span className="text-slate-400 shrink-0 w-16">{row.date.slice(5)}</span>
                             <span className="flex-1 min-w-0 truncate text-slate-600 px-2">
                               {row.item.description}{cp ? ` — ${cp.name}` : ""}
+                              {extraDates && <span className="text-slate-400"> ({extraDates})</span>}
                             </span>
                             <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
                               {row.delta >= 0 ? "+" : ""}{eur(row.delta)}
@@ -2635,6 +2648,8 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
                       <p className="text-sm text-slate-800 truncate">{item.description}{cp ? ` — ${cp.name}` : ""}</p>
                       <p className="text-[11px] text-slate-400 truncate">
                         {entity?.name} · {item.source === "Billtobox" ? "Billtobox" : "Bank"}
+                        {item.payDate && item.payDate !== item.dueDate && <> · Betaal: {item.payDate}</>}
+                        {item.invoiceDate && <> · Fact.: {item.invoiceDate}</>}
                       </p>
                     </div>
                     <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
@@ -2941,7 +2956,10 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
                             <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
-                            <span className="text-xs text-slate-400">· {item.dueDate}</span>
+                            <span className="text-xs text-slate-400">Verval: {item.dueDate}</span>
+                            {item.payDate && item.payDate !== item.dueDate && (
+                              <span className="text-xs text-slate-400">· Betaal: {item.payDate}</span>
+                            )}
                             {item.recurrence !== "once" && (
                               <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
                                 <RotateCcw className="w-2.5 h-2.5" />
@@ -3041,7 +3059,13 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
-                        <span className="text-xs text-slate-400">· {item.dueDate}</span>
+                        <span className="text-xs text-slate-400">Verval: {item.dueDate}</span>
+                        {item.payDate && item.payDate !== item.dueDate && (
+                          <span className="text-xs text-slate-400">· Betaal: {item.payDate}</span>
+                        )}
+                        {item.invoiceDate && (
+                          <span className="text-xs text-slate-400">· Fact.: {item.invoiceDate}</span>
+                        )}
                         {item.source === "Bank-import" && (
                           <span className="text-[10px] font-medium text-teal-600 bg-teal-50 rounded px-1 py-0.5 shrink-0">Bank</span>
                         )}
@@ -3080,5 +3104,4 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
       )}
     </div>
   );
-}
-
+}. 
