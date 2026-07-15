@@ -5,8 +5,11 @@
 export const TABLES = {
   entities: "tblvCShG16EqO56N1", // Boekhoudingen
   counterparties: "tblvZdFmsLq1zC1mp", // Debiteuren_Crediteuren
-  items: "tblDNUpMUR9glpx4j", // Posten
+  items: "tblDNUpMUR9glpx4j", // Posten (Documenten)
   nameMappings: "tblptA57fvdaF68nL", // Naammapping
+  payments: "tblmh8pKgQVlZLO2j", // Betalingen
+  categories: "tblo7GAlHqh767fuk", // Categorieën
+  projects: "tblr58NYZuYrsIXXH", // Projecten
 };
 
 const API_ROOT = "/api/airtable";
