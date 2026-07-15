@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.23.0";
+const APP_VERSION = "1.24.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -241,8 +241,67 @@ function entityFromRecord(r) {
   };
 }
 function counterpartyFromRecord(r) {
-  return { id: r.id, name: r.fields.Naam || "" };
+  return {
+    id: r.id,
+    name: r.fields.Naam || "",
+    autoCreateDoc: !!r.fields.AutomatischDocumentAanmaken,
+    vatNumber: r.fields.BTWNummer || "",
+    accountNumber: r.fields.Rekeningnummer || "",
+    address: r.fields.Adres || "",
+  };
 }
+
+function categoryFromRecord(r) {
+  return { id: r.id, name: r.fields.Naam || "", type: r.fields.Type || "" };
+}
+
+function projectFromRecord(r) {
+  return {
+    id: r.id,
+    name: r.fields.Naam || "",
+    entityId: r.fields.Boekhouding?.[0] || null,
+    status: r.fields.Status || "Actief",
+  };
+}
+
+function paymentFromRecord(r) {
+  let raw = null;
+  try {
+    raw = r.fields.RuweBrongegevens ? JSON.parse(r.fields.RuweBrongegevens) : null;
+  } catch (e) {}
+  return {
+    id: r.id,
+    description: r.fields.Omschrijving || "",
+    date: r.fields.Datum || todayISO(),
+    amount: typeof r.fields.Bedrag === "number" ? r.fields.Bedrag : 0,
+    direction: r.fields.Richting === "in" ? "in" : "uit",
+    entityId: r.fields.Boekhouding?.[0] || null,
+    source: r.fields.Bron || "Cash-handmatig",
+    bankRef: r.fields.Bankreferentie || "",
+    raw,
+    categoryId: r.fields.Categorie?.[0] || null,
+    projectId: r.fields.Project?.[0] || null,
+    documentIds: r.fields.GekoppeldeDocumenten || [],
+    noDocumentNeeded: !!r.fields.GeenDocumentNodig,
+  };
+}
+function paymentToFields(payment) {
+  return {
+    Omschrijving: payment.description,
+    Datum: payment.date,
+    Bedrag: payment.amount,
+    Richting: payment.direction,
+    Boekhouding: payment.entityId ? [payment.entityId] : [],
+    Bron: payment.source || "Cash-handmatig",
+    Bankreferentie: payment.bankRef || "",
+    RuweBrongegevens: payment.raw ? JSON.stringify(payment.raw) : "",
+    Categorie: payment.categoryId ? [payment.categoryId] : [],
+    Project: payment.projectId ? [payment.projectId] : [],
+    GekoppeldeDocumenten: payment.documentIds || [],
+    GeenDocumentNodig: !!payment.noDocumentNeeded,
+  };
+}
+
 function itemFromRecord(r) {
   let paidDates = [];
   try {
@@ -267,6 +326,9 @@ function itemFromRecord(r) {
     bankRef: r.fields.BankRef || "",
     bankSnapshot: r.fields.BankSnapshot || "",
     read: !!r.fields.Gelezen,
+    categoryId: r.fields.Categorie?.[0] || null,
+    projectId: r.fields.Project?.[0] || null,
+    paymentIds: r.fields.Betalingen || [],
     paidDates,
   };
 }
@@ -289,6 +351,8 @@ function itemToFields(item) {
     BankRef: item.bankRef || "",
     BankSnapshot: item.bankSnapshot || "",
     Gelezen: !!item.read,
+    Categorie: item.categoryId ? [item.categoryId] : [],
+    Project: item.projectId ? [item.projectId] : [],
     BetaaldeData: JSON.stringify(item.paidDates || []),
   };
 }
@@ -354,6 +418,9 @@ export default function CashflowPlanner() {
   const [items, setItems] = useState([]);
   const [counterparties, setCounterparties] = useState([]);
   const [nameMappings, setNameMappings] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [projects, setProjects] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [airtableError, setAirtableError] = useState("");
@@ -461,11 +528,14 @@ export default function CashflowPlanner() {
   }
 
   async function loadFromAirtable() {
-    const [entRecs, cpRecs, itemRecs, mapRecs] = await Promise.all([
+    const [entRecs, cpRecs, itemRecs, mapRecs, paymentRecs, catRecs, projRecs] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
       atListAll(TABLES.nameMappings),
+      atListAll(TABLES.payments),
+      atListAll(TABLES.categories),
+      atListAll(TABLES.projects),
     ]);
     return {
       entities: entRecs.map(entityFromRecord),
@@ -477,6 +547,9 @@ export default function CashflowPlanner() {
         correctName: r.fields.CorrecteNaam || "",
         matchType: r.fields.MatchType || "Bevat",
       })),
+      payments: paymentRecs.map(paymentFromRecord),
+      categories: catRecs.map(categoryFromRecord),
+      projects: projRecs.map(projectFromRecord),
     };
   }
 
@@ -505,6 +578,9 @@ export default function CashflowPlanner() {
         setCounterparties(data.counterparties);
         setItems(data.items);
         setNameMappings(data.nameMappings || []);
+        setPayments(data.payments || []);
+        setCategories(data.categories || []);
+        setProjects(data.projects || []);
         setOfflineMode(false);
         setAirtableError("");
         markSynced();
@@ -537,6 +613,9 @@ export default function CashflowPlanner() {
       setCounterparties(data.counterparties);
       setItems(data.items);
       setNameMappings(data.nameMappings || []);
+      setPayments(data.payments || []);
+      setCategories(data.categories || []);
+      setProjects(data.projects || []);
       setOfflineMode(false);
       markSynced();
     } catch (err) {
@@ -591,6 +670,9 @@ export default function CashflowPlanner() {
         setCounterparties(data.counterparties);
         setItems(data.items);
         setNameMappings(data.nameMappings || []);
+        setPayments(data.payments || []);
+        setCategories(data.categories || []);
+        setProjects(data.projects || []);
         markSynced();
         setImportMsg("Geïmporteerd als nieuwe records in Airtable.");
       } catch (err) {
@@ -654,6 +736,9 @@ export default function CashflowPlanner() {
         setCounterparties(reloaded.counterparties);
         setItems(reloaded.items);
         setNameMappings(reloaded.nameMappings || []);
+        setPayments(reloaded.payments || []);
+        setCategories(reloaded.categories || []);
+        setProjects(reloaded.projects || []);
         markSynced();
       }
     } catch (err) {
@@ -887,6 +972,133 @@ export default function CashflowPlanner() {
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
+    }
+  }
+
+  // ---- Betalingen <-> Documenten koppeling (Fase 1 van de herstructurering) ----
+
+  // Koppelt een Betaling aan een Document: legt de wederzijdse link, en werkt
+  // (voor achterwaartse compatibiliteit met alle bestaande betaald-logica)
+  // ook meteen de BetaaldeData van het document bij, zodat Planning/
+  // Crediteuren/Rapport ongewijzigd blijven werken.
+  async function linkPaymentToDocument(payment, doc) {
+    try {
+      const entryDate = fromISO(payment.date);
+      const windowStart = toISO(addDays(entryDate, -10));
+      const windowEnd = toISO(addDays(entryDate, 10));
+      const occ = generateOccurrences(doc, windowStart, windowEnd)
+        .filter((o) => !(doc.paidDates || []).includes(o.date));
+      const matchDate = occ.length > 0
+        ? occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate))[0].date
+        : payment.date;
+      const newPaidDates = [...(doc.paidDates || []), matchDate];
+      const newDocPaymentIds = [...(doc.paymentIds || []), payment.id];
+      const newPaymentDocIds = [...(payment.documentIds || []), doc.id];
+
+      await Promise.all([
+        atUpdate(TABLES.items, [{ id: doc.id, fields: { BetaaldeData: JSON.stringify(newPaidDates), Betalingen: newDocPaymentIds } }]),
+        atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]),
+      ]);
+
+      setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paidDates: newPaidDates, paymentIds: newDocPaymentIds } : i)));
+      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  async function unlinkPaymentFromDocument(payment, docId) {
+    try {
+      const doc = items.find((i) => i.id === docId);
+      const newPaymentDocIds = (payment.documentIds || []).filter((id) => id !== docId);
+      await atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]);
+      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
+      if (doc) {
+        const newDocPaymentIds = (doc.paymentIds || []).filter((id) => id !== payment.id);
+        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]);
+        setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i)));
+      }
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  async function toggleNoDocumentNeeded(payment) {
+    try {
+      const next = !payment.noDocumentNeeded;
+      await atUpdate(TABLES.payments, [{ id: payment.id, fields: { GeenDocumentNodig: next } }]);
+      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, noDocumentNeeded: next } : p)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  async function addManualPayment(draft) {
+    try {
+      const fields = paymentToFields({
+        description: draft.description || "Handmatige betaling",
+        date: draft.date,
+        amount: Math.abs(Number(draft.amount)) || 0,
+        direction: draft.direction,
+        entityId: draft.entityId,
+        source: draft.source, // "Cash-handmatig" | "Andere-bank-handmatig"
+        bankRef: "",
+        raw: null,
+        categoryId: null,
+        projectId: null,
+        documentIds: [],
+        noDocumentNeeded: false,
+      });
+      const [rec] = await atCreate(TABLES.payments, [{ fields }]);
+      const created = paymentFromRecord(rec);
+      setPayments((prev) => [...prev, created]);
+      markSynced();
+      return created;
+    } catch (err) {
+      setAirtableError(err.message);
+      return null;
+    }
+  }
+
+  // Voor een Document zonder gekoppelde Betaling en zonder document-aanmaak-
+  // vertrouwen bij de crediteur: maakt een nieuw Document aan vanuit een
+  // ongekoppelde Betaling, na bevestiging in de UI (het "voorstel").
+  async function createDocumentFromPayment(payment, extra = {}) {
+    try {
+      const counterpartyId = extra.counterpartyId || null;
+      const fields = itemToFields({
+        description: extra.description || payment.description,
+        entityId: payment.entityId,
+        counterpartyId,
+        accountNumber: "",
+        note: payment.raw?.remittance || "",
+        amount: payment.amount,
+        direction: payment.direction,
+        dueDate: payment.date,
+        payDate: payment.date,
+        invoiceDate: null,
+        recurrence: "once",
+        endDate: null,
+        viaPaypal: false,
+        source: payment.source,
+        bankRef: payment.bankRef,
+        bankSnapshot: payment.raw ? JSON.stringify({ ...payment.raw, wasCreated: true }) : "",
+        read: false,
+        categoryId: payment.categoryId,
+        projectId: payment.projectId,
+        paidDates: [],
+      });
+      const [rec] = await atCreate(TABLES.items, [{ fields }]);
+      const created = itemFromRecord(rec);
+      setItems((prev) => [...prev, created]);
+      await linkPaymentToDocument(payment, created);
+      return created;
+    } catch (err) {
+      setAirtableError(err.message);
+      return null;
     }
   }
 
@@ -1490,6 +1702,12 @@ export default function CashflowPlanner() {
                 Afpunten{unreadCount > 0 ? ` (${unreadCount})` : ""}
               </button>
               <button
+                onClick={() => setView("koppelen")}
+                className={`px-3 py-1.5 rounded-full transition ${view === "koppelen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                Koppelen
+              </button>
+              <button
                 onClick={() => setView("boekhoudingen")}
                 className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
@@ -1843,6 +2061,21 @@ export default function CashflowPlanner() {
             filteredEntityIds={filteredEntityIds}
             onRelink={relinkBankEntry}
             onMarkRead={markRead}
+          />
+        ) : view === "koppelen" ? (
+          <KoppelenView
+            items={items}
+            payments={payments}
+            entities={sortedEntities}
+            entityById={entityById}
+            counterpartyById={counterpartyById}
+            filteredEntityIds={filteredEntityIds}
+            activeEntity={activeEntity}
+            onLink={linkPaymentToDocument}
+            onUnlink={unlinkPaymentFromDocument}
+            onToggleNoDocNeeded={toggleNoDocumentNeeded}
+            onAddManualPayment={addManualPayment}
+            onCreateDocFromPayment={createDocumentFromPayment}
           />
         ) : (
           <BoekhoudingenView
@@ -2512,6 +2745,193 @@ function ChartView({ runningBalances, activeEntity, entities }) {
       <div className="grid grid-cols-2 gap-2">
         <SummaryCard label={source.isBank ? "Huidig banksaldo" : "Huidig saldo"} value={source.opening} tone="pos" />
         <SummaryCard label="Verwacht eindsaldo" value={data[data.length - 1]?.saldo ?? source.opening} tone={data[data.length - 1]?.saldo >= 0 ? "pos" : "neg"} />
+      </div>
+    </div>
+  );
+}
+
+function KoppelenView({
+  items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment,
+}) {
+  const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  const [showNewPayment, setShowNewPayment] = useState(false);
+  const [newPayment, setNewPayment] = useState({
+    description: "", date: todayISO(), amount: "", direction: "uit",
+    entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig",
+  });
+  const [adding, setAdding] = useState(false);
+
+  const unlinkedPayments = payments
+    .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const unlinkedDocs = items
+    .filter((it) =>
+      filteredEntityIds.includes(it.entityId) &&
+      (it.paymentIds || []).length === 0 &&
+      (it.paidDates || []).length === 0
+    )
+    .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+
+  const selectedPayment = unlinkedPayments.find((p) => p.id === selectedPaymentId) || null;
+
+  return (
+    <div className="mt-4 space-y-4">
+      <p className="text-xs text-slate-400">
+        Koppel binnengekomen betalingen aan de bijhorende documenten. Selecteer eerst een betaling, klik dan het passende document aan.
+      </p>
+
+      {/* Sectie 1: Betalingen */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-xs font-medium text-slate-500">Ongekoppelde betalingen ({unlinkedPayments.length})</p>
+          <button onClick={() => setShowNewPayment((s) => !s)} className="text-xs text-slate-400 underline decoration-dotted">
+            + Nieuwe betaling
+          </button>
+        </div>
+
+        {showNewPayment && (
+          <div className="bg-white border border-slate-200 rounded-xl p-3 mb-2 space-y-2">
+            <input
+              value={newPayment.description}
+              onChange={(e) => setNewPayment({ ...newPayment, description: e.target.value })}
+              placeholder="Omschrijving"
+              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={newPayment.date}
+                onChange={(e) => setNewPayment({ ...newPayment, date: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              />
+              <input
+                type="number"
+                step="0.01"
+                value={newPayment.amount}
+                onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                placeholder="Bedrag"
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={newPayment.entityId}
+                onChange={(e) => setNewPayment({ ...newPayment, entityId: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              >
+                <option value="" disabled>Boekhouding…</option>
+                {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+              </select>
+              <select
+                value={newPayment.source}
+                onChange={(e) => setNewPayment({ ...newPayment, source: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              >
+                <option value="Cash-handmatig">Cash</option>
+                <option value="Andere-bank-handmatig">Andere bank</option>
+              </select>
+            </div>
+            <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs">
+              <button
+                onClick={() => setNewPayment({ ...newPayment, direction: "uit" })}
+                className={`flex-1 py-1.5 rounded-md ${newPayment.direction === "uit" ? "bg-white shadow-sm text-rose-600" : "text-slate-400"}`}
+              >
+                Uitgave
+              </button>
+              <button
+                onClick={() => setNewPayment({ ...newPayment, direction: "in" })}
+                className={`flex-1 py-1.5 rounded-md ${newPayment.direction === "in" ? "bg-white shadow-sm text-emerald-600" : "text-slate-400"}`}
+              >
+                Inkomst
+              </button>
+            </div>
+            <button
+              onClick={async () => {
+                if (!newPayment.entityId || !newPayment.amount) return;
+                setAdding(true);
+                await onAddManualPayment(newPayment);
+                setAdding(false);
+                setShowNewPayment(false);
+                setNewPayment({ description: "", date: todayISO(), amount: "", direction: "uit", entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig" });
+              }}
+              disabled={!newPayment.entityId || !newPayment.amount || adding}
+              className="w-full bg-slate-900 text-white rounded-lg py-2 text-xs font-medium disabled:opacity-40"
+            >
+              {adding ? "Bezig…" : "Betaling toevoegen"}
+            </button>
+          </div>
+        )}
+
+        {unlinkedPayments.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-4 bg-white border border-slate-200 rounded-xl">Niets openstaand.</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
+            {unlinkedPayments.map((p) => {
+              const entity = entityById[p.entityId];
+              const selected = selectedPaymentId === p.id;
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => setSelectedPaymentId(selected ? null : p.id)}
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer ${selected ? "bg-slate-900/5" : ""}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                    <p className="text-[11px] text-slate-400">{entity?.name} · {p.date} · {p.source}</p>
+                  </div>
+                  <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                    {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(p); }}
+                    className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+                  >
+                    geen document
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sectie 2: Documenten */}
+      <div>
+        <p className="text-xs font-medium text-slate-500 mb-1.5">
+          Ongekoppelde documenten ({unlinkedDocs.length})
+          {selectedPayment && <span className="text-slate-400 font-normal"> — klik om te koppelen aan "{selectedPayment.description}"</span>}
+        </p>
+        {unlinkedDocs.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-4 bg-white border border-slate-200 rounded-xl">Niets openstaand.</p>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
+            {unlinkedDocs.map((doc) => {
+              const entity = entityById[doc.entityId];
+              const cp = doc.counterpartyId ? counterpartyById[doc.counterpartyId] : null;
+              return (
+                <div
+                  key={doc.id}
+                  onClick={async () => {
+                    if (!selectedPayment) return;
+                    await onLink(selectedPayment, doc);
+                    setSelectedPaymentId(null);
+                  }}
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 ${selectedPayment ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-800 truncate">{doc.description}{cp ? ` — ${cp.name}` : ""}</p>
+                    <p className="text-[11px] text-slate-400">{entity?.name} · Verval: {doc.dueDate}</p>
+                  </div>
+                  <span className={`text-sm font-medium shrink-0 ${doc.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                    {doc.direction === "in" ? "+" : "−"}{eur(doc.amount)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
