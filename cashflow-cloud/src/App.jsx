@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.25.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1016,8 +1016,19 @@ export default function CashflowPlanner() {
       setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
       if (doc) {
         const newDocPaymentIds = (doc.paymentIds || []).filter((id) => id !== payment.id);
-        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]);
-        setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i)));
+        // Verwijder ook de betaald-markering die bij het koppelen werd gezet —
+        // anders blijft het document als "betaald" gelden zonder koppeling.
+        const paymentDate = fromISO(payment.date);
+        const paidDates = doc.paidDates || [];
+        let newPaidDates = paidDates;
+        if (paidDates.length > 0) {
+          const closest = paidDates.slice().sort(
+            (a, b) => Math.abs(fromISO(a) - paymentDate) - Math.abs(fromISO(b) - paymentDate)
+          )[0];
+          newPaidDates = paidDates.filter((d) => d !== closest);
+        }
+        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds, BetaaldeData: JSON.stringify(newPaidDates) } }]);
+        setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds, paidDates: newPaidDates } : i)));
       }
       markSynced();
     } catch (err) {
@@ -2755,6 +2766,7 @@ function KoppelenView({
   onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment,
 }) {
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  const [showLinked, setShowLinked] = useState(false);
   const [showNewPayment, setShowNewPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({
     description: "", date: todayISO(), amount: "", direction: "uit",
@@ -2773,6 +2785,10 @@ function KoppelenView({
       (it.paidDates || []).length === 0
     )
     .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+
+  const linkedPayments = payments
+    .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length > 0)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
 
   const selectedPayment = unlinkedPayments.find((p) => p.id === selectedPaymentId) || null;
 
@@ -2930,6 +2946,59 @@ function KoppelenView({
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      {/* Sectie 3: Gekoppelde betalingen — corrigeer een foute koppeling */}
+      <div>
+        <button
+          onClick={() => setShowLinked((s) => !s)}
+          className="w-full flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3.5 py-3"
+        >
+          <p className="text-xs font-medium text-slate-500">Gekoppelde betalingen ({linkedPayments.length})</p>
+          <ChevronDown className={`w-4 h-4 text-slate-300 transition-transform ${showLinked ? "rotate-180" : ""}`} />
+        </button>
+        {showLinked && (
+          <div className="bg-white border border-t-0 border-slate-200 rounded-b-xl divide-y divide-slate-50 -mt-px">
+            {linkedPayments.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-4">Nog geen koppelingen.</p>
+            ) : (
+              linkedPayments.map((p) => {
+                const entity = entityById[p.entityId];
+                return (
+                  <div key={p.id} className="px-3.5 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                        <p className="text-[11px] text-slate-400">{entity?.name} · {p.date}</p>
+                      </div>
+                      <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                        {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 space-y-1">
+                      {(p.documentIds || []).map((docId) => {
+                        const doc = items.find((i) => i.id === docId);
+                        return (
+                          <div key={docId} className="flex items-center justify-between bg-slate-50 rounded-md px-2 py-1.5">
+                            <span className="text-[11px] text-slate-600 truncate">
+                              → {doc ? doc.description : "(document niet gevonden)"}
+                            </span>
+                            <button
+                              onClick={() => onUnlink(p, docId)}
+                              className="text-[10px] text-rose-500 underline decoration-dotted shrink-0 ml-2"
+                            >
+                              ontkoppel
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
       </div>
