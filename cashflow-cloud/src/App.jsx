@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.26.0";
+const APP_VERSION = "1.27.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1122,6 +1122,24 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Verwijdert een Betaling. Was ze nog gekoppeld, dan wordt eerst netjes
+  // ontkoppeld (paidDates op de gekoppelde documenten opgeschoond) voor de
+  // betaling zelf verdwijnt — zelfde opruimlogica als unlinkPaymentFromDocument.
+  async function deletePayment(payment) {
+    try {
+      let working = payment;
+      for (const docId of payment.documentIds || []) {
+        await unlinkPaymentFromDocument(working, docId);
+        working = { ...working, documentIds: (working.documentIds || []).filter((id) => id !== docId) };
+      }
+      await atDelete(TABLES.payments, [payment.id]);
+      setPayments((prev) => prev.filter((p) => p.id !== payment.id));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // Voor een Document zonder gekoppelde Betaling en zonder document-aanmaak-
   // vertrouwen bij de crediteur: maakt een nieuw Document aan vanuit een
   // ongekoppelde Betaling, na bevestiging in de UI (het "voorstel").
@@ -2136,6 +2154,7 @@ export default function CashflowPlanner() {
             onAddManualPayment={addManualPayment}
             onCreateDocFromPayment={createDocumentFromPayment}
             onResolveCounterparty={resolveCounterpartyId}
+            onDeletePayment={deletePayment}
           />
         ) : (
           <BoekhoudingenView
@@ -2813,7 +2832,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment,
 }) {
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
   const [showLinked, setShowLinked] = useState(false);
@@ -2971,6 +2990,12 @@ function KoppelenView({
                     >
                       geen document
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
+                      className="text-[10px] text-rose-400 underline decoration-dotted"
+                    >
+                      verwijder
+                    </button>
                   </div>
                 </div>
                 {isCreatingDocRow && (
@@ -3078,6 +3103,12 @@ function KoppelenView({
                       <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                         {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
                       </span>
+                      <button
+                        onClick={() => onDeletePayment(p)}
+                        className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
+                      >
+                        verwijder
+                      </button>
                     </div>
                     <div className="mt-1.5 space-y-1">
                       {(p.documentIds || []).map((docId) => {
