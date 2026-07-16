@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.25.0";
+const APP_VERSION = "1.26.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -725,7 +725,7 @@ export default function CashflowPlanner() {
       if (!res.ok) {
         setImportMsg(`PocketSmith-sync mislukt: ${data.error || res.status}`);
       } else {
-        let msg = `PocketSmith: ${data.matched} gematcht, ${data.created} nieuw, ${data.skipped} overgeslagen, ${data.balancesUpdated ?? 0} saldi bijgewerkt.`;
+        let msg = `PocketSmith: ${data.matched} gekoppeld, ${data.created} document(en) automatisch aangemaakt, ${data.proposed ?? 0} wachten in Koppelen, ${data.skipped} overgeslagen, ${data.balancesUpdated ?? 0} saldi bijgewerkt.`;
         if (data.balanceError) msg += ` Saldi-fout: ${data.balanceError}`;
         else if ((data.balancesUpdated ?? 0) === 0 && data.pocketsmithAccountNames?.length) {
           msg += ` PocketSmith-rekeningnamen: ${data.pocketsmithAccountNames.join(", ")}`;
@@ -752,15 +752,17 @@ export default function CashflowPlanner() {
     if (!bankParsed || !bankEntityId) return;
     setBankImporting(true);
     setBankError("");
-    let matched = 0, created = 0, skipped = 0, errors = 0;
+    let matched = 0, created = 0, proposed = 0, skipped = 0, errors = 0;
 
-    // Work off a local snapshot so matches within this same import don't
+    // Work off local snapshots so matches within this same import don't
     // collide with each other before React state catches up.
     let workingItems = items;
+    let workingPayments = payments;
+    let workingCounterparties = counterparties;
 
     for (const entry of bankParsed.entries) {
       try {
-        const alreadyImported = entry.ref && workingItems.some((i) => i.bankRef === entry.ref);
+        const alreadyImported = entry.ref && workingPayments.some((p) => p.bankRef === entry.ref);
         if (alreadyImported) { skipped++; continue; }
 
         const candidates = workingItems.filter(
@@ -783,47 +785,91 @@ export default function CashflowPlanner() {
           }
         }
 
+        const snapshot = { ...entry, wasCreated: !matchedItem };
+        const paymentFields = paymentToFields({
+          description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
+          date: entry.bookingDate,
+          amount: entry.amount,
+          direction: entry.direction,
+          entityId: bankEntityId,
+          source: "Bank-import",
+          bankRef: entry.ref,
+          raw: snapshot,
+          categoryId: null,
+          projectId: null,
+          documentIds: matchedItem ? [matchedItem.id] : [],
+          noDocumentNeeded: false,
+        });
+        const [paymentRec] = await atCreate(TABLES.payments, [{ fields: paymentFields }]);
+        let newPayment = paymentFromRecord(paymentRec);
+        workingPayments = [...workingPayments, newPayment];
+
         if (matchedItem) {
-          const snapshot = JSON.stringify({ ...entry, wasCreated: false });
           const newPaidDates = [...(matchedItem.paidDates || []), matchedDate];
-          const fields = {
-            BetaaldeData: JSON.stringify(newPaidDates),
-            Bron: "Bank-import",
-            BankRef: entry.ref,
-            BankSnapshot: snapshot,
-            Gelezen: false,
-          };
-          await atUpdate(TABLES.items, [{ id: matchedItem.id, fields }]);
+          const newDocPaymentIds = [...(matchedItem.paymentIds || []), newPayment.id];
+          await atUpdate(TABLES.items, [{
+            id: matchedItem.id,
+            fields: { BetaaldeData: JSON.stringify(newPaidDates), Betalingen: newDocPaymentIds, Bron: "Bank-import", Gelezen: false },
+          }]);
           workingItems = workingItems.map((i) =>
             i.id === matchedItem.id
-              ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: entry.ref, bankSnapshot: snapshot, read: false }
+              ? { ...i, paidDates: newPaidDates, paymentIds: newDocPaymentIds, source: "Bank-import", read: false }
               : i
           );
           matched++;
         } else {
-          const snapshot = JSON.stringify({ ...entry, wasCreated: true });
-          const counterpartyId = entry.counterpartyName ? await resolveCounterpartyId(entry.counterpartyName) : null;
-          const fields = itemToFields({
-            description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
-            entityId: bankEntityId,
-            counterpartyId,
-            accountNumber: entry.counterpartyIban || "",
-            note: [...new Set([entry.counterpartyName, entry.remittance].filter(Boolean))].join(" — "),
-            amount: entry.amount,
-            direction: entry.direction,
-            dueDate: entry.bookingDate,
-            recurrence: "once",
-            endDate: null,
-            viaPaypal: false,
-            source: "Bank-import",
-            bankRef: entry.ref,
-            bankSnapshot: snapshot,
-            paidDates: [entry.bookingDate],
-          });
-          const [rec] = await atCreate(TABLES.items, [{ fields }]);
-          const createdItem = itemFromRecord(rec);
-          workingItems = [...workingItems, createdItem];
-          created++;
+          let counterpartyId = null;
+          let trustedCounterparty = false;
+          if (entry.counterpartyName) {
+            const existing = workingCounterparties.find(
+              (c) => c.name.toLowerCase() === entry.counterpartyName.toLowerCase()
+            );
+            if (existing) {
+              counterpartyId = existing.id;
+              trustedCounterparty = existing.autoCreateDoc;
+            } else {
+              // Gloednieuwe crediteur/debiteur — kan per definitie nog niet
+              // vertrouwd zijn (AutomatischDocumentAanmaken staat nooit aan
+              // bij aanmaak).
+              counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
+            }
+          }
+
+          if (trustedCounterparty) {
+            // Vertrouwde crediteur/debiteur: meteen automatisch een document
+            // aanmaken en koppelen, geen bevestiging nodig.
+            const docFields = itemToFields({
+              description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
+              entityId: bankEntityId,
+              counterpartyId,
+              accountNumber: entry.counterpartyIban || "",
+              note: [...new Set([entry.counterpartyName, entry.remittance].filter(Boolean))].join(" — "),
+              amount: entry.amount,
+              direction: entry.direction,
+              dueDate: entry.bookingDate,
+              payDate: entry.bookingDate,
+              recurrence: "once",
+              endDate: null,
+              viaPaypal: false,
+              source: "Bank-import",
+              bankRef: entry.ref,
+              bankSnapshot: JSON.stringify(snapshot),
+              read: false,
+              paidDates: [entry.bookingDate],
+            });
+            const [docRec] = await atCreate(TABLES.items, [{ fields: docFields }]);
+            const createdDoc = itemFromRecord(docRec);
+            workingItems = [...workingItems, createdDoc];
+
+            const linkedDocIds = [createdDoc.id];
+            await atUpdate(TABLES.payments, [{ id: newPayment.id, fields: { GekoppeldeDocumenten: linkedDocIds } }]);
+            workingPayments = workingPayments.map((p) => (p.id === newPayment.id ? { ...p, documentIds: linkedDocIds } : p));
+            created++;
+          } else {
+            // Geen match, geen vertrouwde crediteur: betaling blijft
+            // ongekoppeld — te bevestigen/koppelen in het Koppelen-scherm.
+            proposed++;
+          }
         }
       } catch (err) {
         errors++;
@@ -851,8 +897,10 @@ export default function CashflowPlanner() {
     }
 
     setItems(workingItems);
+    setPayments(workingPayments);
+    setCounterparties(workingCounterparties);
     markSynced();
-    setBankResult({ matched, created, skipped, errors, total: bankParsed.entries.length });
+    setBankResult({ matched, created, proposed, skipped, errors, total: bankParsed.entries.length });
     setBankImporting(false);
   }
 
@@ -2087,6 +2135,7 @@ export default function CashflowPlanner() {
             onToggleNoDocNeeded={toggleNoDocumentNeeded}
             onAddManualPayment={addManualPayment}
             onCreateDocFromPayment={createDocumentFromPayment}
+            onResolveCounterparty={resolveCounterpartyId}
           />
         ) : (
           <BoekhoudingenView
@@ -2186,8 +2235,9 @@ export default function CashflowPlanner() {
               <div className="mt-2 space-y-3">
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">
                   <p className="font-medium mb-1">Import voltooid</p>
-                  <p>{bankResult.matched} gematcht met bestaande posten</p>
-                  <p>{bankResult.created} nieuwe posten aangemaakt</p>
+                  <p>{bankResult.matched} gekoppeld aan bestaand document</p>
+                  <p>{bankResult.created} document automatisch aangemaakt (vertrouwde crediteur)</p>
+                  {bankResult.proposed > 0 && <p>{bankResult.proposed} betaling(en) wachten in "Koppelen" — geen match, geen vertrouwde crediteur</p>}
                   {bankResult.skipped > 0 && <p>{bankResult.skipped} overgeslagen (al eerder geïmporteerd)</p>}
                   {bankResult.errors > 0 && <p className="text-rose-600">{bankResult.errors} mislukt</p>}
                 </div>
@@ -2763,7 +2813,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty,
 }) {
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
   const [showLinked, setShowLinked] = useState(false);
@@ -2773,6 +2823,9 @@ function KoppelenView({
     entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig",
   });
   const [adding, setAdding] = useState(false);
+  const [creatingDocForId, setCreatingDocForId] = useState(null);
+  const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
+  const [creatingDoc, setCreatingDoc] = useState(false);
 
   const unlinkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
@@ -2887,9 +2940,10 @@ function KoppelenView({
             {unlinkedPayments.map((p) => {
               const entity = entityById[p.entityId];
               const selected = selectedPaymentId === p.id;
+              const isCreatingDocRow = creatingDocForId === p.id;
               return (
+                <React.Fragment key={p.id}>
                 <div
-                  key={p.id}
                   onClick={() => setSelectedPaymentId(selected ? null : p.id)}
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer ${selected ? "bg-slate-900/5" : ""}`}
                 >
@@ -2900,13 +2954,61 @@ function KoppelenView({
                   <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
                   </span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(p); }}
-                    className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
-                  >
-                    geen document
-                  </button>
+                  <div className="flex flex-col items-end gap-0.5 shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCreatingDocForId(isCreatingDocRow ? null : p.id);
+                        setDocDraft({ description: p.description, counterpartyName: "" });
+                      }}
+                      className="text-[10px] text-slate-500 underline decoration-dotted"
+                    >
+                      maak document
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(p); }}
+                      className="text-[10px] text-slate-400 underline decoration-dotted"
+                    >
+                      geen document
+                    </button>
+                  </div>
                 </div>
+                {isCreatingDocRow && (
+                  <div className="px-3.5 pb-3.5 space-y-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      value={docDraft.description}
+                      onChange={(e) => setDocDraft({ ...docDraft, description: e.target.value })}
+                      placeholder="Omschrijving document"
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                    />
+                    <input
+                      value={docDraft.counterpartyName}
+                      onChange={(e) => setDocDraft({ ...docDraft, counterpartyName: e.target.value })}
+                      placeholder="Crediteur/debiteur (optioneel — bestaande naam of nieuw)"
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          setCreatingDoc(true);
+                          const counterpartyId = docDraft.counterpartyName.trim()
+                            ? await onResolveCounterparty(docDraft.counterpartyName.trim())
+                            : null;
+                          await onCreateDocFromPayment(p, { description: docDraft.description, counterpartyId });
+                          setCreatingDoc(false);
+                          setCreatingDocForId(null);
+                        }}
+                        className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium"
+                      >
+                        Bevestig document
+                      </button>
+                      <button onClick={() => setCreatingDocForId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                        Annuleer
+                      </button>
+                    </div>
+                  </div>
+                )}
+                </React.Fragment>
               );
             })}
           </div>
