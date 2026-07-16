@@ -20,6 +20,7 @@ const TABLES = {
   counterparties: "tblvZdFmsLq1zC1mp",
   items: "tblDNUpMUR9glpx4j",
   nameMappings: "tblptA57fvdaF68nL",
+  payments: "tblmh8pKgQVlZLO2j",
 };
 
 function airtableHeaders() {
@@ -237,11 +238,12 @@ export default async function handler(req, res) {
     const endDate = req.query?.end || toISODate(new Date());
     const startDate = req.query?.start || addDays(endDate, -3); // kleine overlap, dedup via BankRef vangt dubbels op
 
-    const [entities, counterparties, items, nameMappingRecs, txResult] = await Promise.all([
+    const [entities, counterparties, items, nameMappingRecs, existingPayments, txResult] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
       atListAll(TABLES.nameMappings),
+      atListAll(TABLES.payments),
       fetchPocketSmithTransactions(startDate, endDate),
     ]);
     const { userId, transactions } = txResult;
@@ -250,13 +252,14 @@ export default async function handler(req, res) {
       correctName: r.fields.CorrecteNaam || "",
       matchType: r.fields.MatchType || "Bevat",
     }));
+    const importedRefs = new Set(existingPayments.map((p) => p.fields.Bankreferentie).filter(Boolean));
 
-    let matched = 0, created = 0, skipped = 0, errors = 0;
+    let matched = 0, created = 0, proposed = 0, skipped = 0, errors = 0;
 
     for (const tx of transactions) {
       try {
         const ref = `ps-${tx.id}`;
-        const alreadyImported = items.some((i) => i.fields.BankRef === ref);
+        const alreadyImported = items.some((i) => i.fields.BankRef === ref) || importedRefs.has(ref);
         if (alreadyImported) { skipped++; continue; }
 
         const accountName = tx.transaction_account?.name || "";
@@ -278,38 +281,64 @@ export default async function handler(req, res) {
             Math.abs(itemAmount - amount) < 0.01 && !paidDates.includes(f.Datum);
         });
 
-        if (candidates.length > 0) {
-          const target = candidates[0];
-          const snapshot = JSON.stringify({ ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "", wasCreated: false });
+        const snapshot = { ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "" };
+        const target = candidates.length > 0 ? candidates[0] : null;
+        snapshot.wasCreated = !target;
+
+        const paymentFields = {
+          Omschrijving: payee.slice(0, 80),
+          Datum: date,
+          Bedrag: amount,
+          Richting: direction,
+          Boekhouding: [entity.id],
+          Bron: "PocketSmith",
+          Bankreferentie: ref,
+          RuweBrongegevens: JSON.stringify(snapshot),
+          GekoppeldeDocumenten: target ? [target.id] : [],
+          GeenDocumentNodig: false,
+        };
+        const paymentRec = await atCreate(TABLES.payments, paymentFields);
+
+        if (target) {
           const paidDates = (() => { try { return JSON.parse(target.fields.BetaaldeData || "[]"); } catch (e) { return []; } })();
           const newPaidDates = [...paidDates, target.fields.Datum];
+          const newDocPayments = [...(target.fields.Betalingen || []), paymentRec.id];
           await atUpdate(TABLES.items, target.id, {
             BetaaldeData: JSON.stringify(newPaidDates),
+            Betalingen: newDocPayments,
             Bron: "Bank-import",
             Gelezen: false,
-            BankRef: ref,
-            BankSnapshot: snapshot,
           });
           matched++;
         } else {
-          const snapshot = JSON.stringify({ ref, amount, direction, bookingDate: date, counterpartyName: payee, remittance: tx.note || "", wasCreated: true });
-          const counterpartyId = await resolveCounterpartyId(payee, counterparties);
-          await atCreate(TABLES.items, {
-            Omschrijving: payee.slice(0, 80),
-            Boekhouding: [entity.id],
-            DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
-            Opmerking: rawPayee,
-            Bedrag: amount,
-            Richting: direction,
-            Datum: date,
-            Herhaling: "once",
-            Bron: "Bank-import",
-            Gelezen: false,
-            BankRef: ref,
-            BankSnapshot: snapshot,
-            BetaaldeData: JSON.stringify([date]),
-          });
-          created++;
+          const existing = counterparties.find((c) => (c.fields.Naam || "").toLowerCase() === payee.toLowerCase());
+          const trusted = existing ? !!existing.fields.AutomatischDocumentAanmaken : false;
+
+          if (trusted) {
+            const counterpartyId = await resolveCounterpartyId(payee, counterparties);
+            const docRec = await atCreate(TABLES.items, {
+              Omschrijving: payee.slice(0, 80),
+              Boekhouding: [entity.id],
+              DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
+              Opmerking: rawPayee,
+              Bedrag: amount,
+              Richting: direction,
+              Datum: date,
+              Betaaldatum: date,
+              Herhaling: "once",
+              Bron: "Bank-import",
+              Gelezen: false,
+              BankRef: ref,
+              BankSnapshot: JSON.stringify(snapshot),
+              BetaaldeData: JSON.stringify([date]),
+            });
+            await atUpdate(TABLES.payments, paymentRec.id, { GekoppeldeDocumenten: [docRec.id] });
+            created++;
+          } else {
+            // Geen match, geen vertrouwde crediteur: betaling blijft
+            // ongekoppeld — te bevestigen/koppelen in het Koppelen-scherm.
+            proposed++;
+          }
         }
       } catch (err) {
         errors++;
@@ -346,6 +375,7 @@ export default async function handler(req, res) {
       total: transactions.length,
       matched,
       created,
+      proposed,
       skipped,
       errors,
       balancesUpdated,
