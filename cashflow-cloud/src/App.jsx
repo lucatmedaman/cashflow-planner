@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.27.0";
+const APP_VERSION = "1.28.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1140,6 +1140,58 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Eenmalige (maar veilig herhaalbare) migratie: voor elk bestaand document
+  // met Bron=Bank-import dat nog geen gekoppelde Betaling heeft (dus van vóór
+  // de Betalingen-tabel bestond), alsnog een echte Betaling-record aanmaken
+  // en koppelen — puur op basis van wat al op het document zelf staat
+  // (BankSnapshot indien aanwezig, anders de eigen velden als terugval).
+  async function backfillHistoricBankPayments() {
+    const targets = items.filter((i) => i.source === "Bank-import" && (i.paymentIds || []).length === 0);
+    let done = 0, failed = 0;
+    let workingItems = items;
+    let workingPayments = payments;
+
+    for (const doc of targets) {
+      try {
+        let snap = null;
+        try { snap = doc.bankSnapshot ? JSON.parse(doc.bankSnapshot) : null; } catch (e) {}
+
+        const bankRef = doc.bankRef || (snap && snap.ref) || "";
+        const isPocketSmith = bankRef.startsWith("ps-");
+        const paymentDraft = {
+          description: (snap && (snap.counterpartyName || snap.remittance)) || doc.description,
+          date: (snap && snap.bookingDate) || doc.dueDate,
+          amount: (snap && snap.amount) || doc.amount,
+          direction: (snap && snap.direction) || doc.direction,
+          entityId: doc.entityId,
+          source: isPocketSmith ? "PocketSmith" : "Bank-import",
+          bankRef,
+          raw: snap || { amount: doc.amount, direction: doc.direction, bookingDate: doc.dueDate, counterpartyName: doc.description, remittance: doc.note || "", wasCreated: null },
+          categoryId: null,
+          projectId: null,
+          documentIds: [doc.id],
+          noDocumentNeeded: false,
+        };
+        const fields = paymentToFields(paymentDraft);
+        const [rec] = await atCreate(TABLES.payments, [{ fields }]);
+        const created = paymentFromRecord(rec);
+        workingPayments = [...workingPayments, created];
+
+        const newDocPaymentIds = [...(doc.paymentIds || []), created.id];
+        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]);
+        workingItems = workingItems.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i));
+        done++;
+      } catch (err) {
+        failed++;
+      }
+    }
+
+    setItems(workingItems);
+    setPayments(workingPayments);
+    markSynced();
+    return { total: targets.length, done, failed };
+  }
+
   // Voor een Document zonder gekoppelde Betaling en zonder document-aanmaak-
   // vertrouwen bij de crediteur: maakt een nieuw Document aan vanuit een
   // ongekoppelde Betaling, na bevestiging in de UI (het "voorstel").
@@ -2155,6 +2207,7 @@ export default function CashflowPlanner() {
             onCreateDocFromPayment={createDocumentFromPayment}
             onResolveCounterparty={resolveCounterpartyId}
             onDeletePayment={deletePayment}
+            onBackfill={backfillHistoricBankPayments}
           />
         ) : (
           <BoekhoudingenView
@@ -2832,10 +2885,12 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill,
 }) {
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
   const [showLinked, setShowLinked] = useState(false);
+  const [showUnlinkedPayments, setShowUnlinkedPayments] = useState(true);
+  const [showUnlinkedDocs, setShowUnlinkedDocs] = useState(true);
   const [showNewPayment, setShowNewPayment] = useState(false);
   const [newPayment, setNewPayment] = useState({
     description: "", date: todayISO(), amount: "", direction: "uit",
@@ -2845,6 +2900,8 @@ function KoppelenView({
   const [creatingDocForId, setCreatingDocForId] = useState(null);
   const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
   const [creatingDoc, setCreatingDoc] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState(null);
 
   const unlinkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
@@ -2870,14 +2927,47 @@ function KoppelenView({
         Koppel binnengekomen betalingen aan de bijhorende documenten. Selecteer eerst een betaling, klik dan het passende document aan.
       </p>
 
-      {/* Sectie 1: Betalingen */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-slate-500">Ongekoppelde betalingen ({unlinkedPayments.length})</p>
-          <button onClick={() => setShowNewPayment((s) => !s)} className="text-xs text-slate-400 underline decoration-dotted">
-            + Nieuwe betaling
+      <div className="bg-white border border-slate-200 rounded-xl p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">Oudere bank-posten (van vóór dit scherm) missen nog een echte Betaling-koppeling.</p>
+          <button
+            onClick={async () => {
+              setBackfilling(true);
+              setBackfillResult(null);
+              const result = await onBackfill();
+              setBackfillResult(result);
+              setBackfilling(false);
+            }}
+            disabled={backfilling}
+            className="shrink-0 text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+          >
+            {backfilling ? "Bezig…" : "Aanvullen"}
           </button>
         </div>
+        {backfillResult && (
+          <p className="text-[11px] text-emerald-700 mt-1.5">
+            {backfillResult.done} aangevuld{backfillResult.failed > 0 ? `, ${backfillResult.failed} mislukt` : ""} (van {backfillResult.total}).
+          </p>
+        )}
+      </div>
+
+      {/* Sectie 1: Betalingen */}
+      <div>
+        <button
+          onClick={() => setShowUnlinkedPayments((s) => !s)}
+          className="w-full flex items-center justify-between mb-1.5"
+        >
+          <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showUnlinkedPayments ? "rotate-180" : ""}`} />
+            Ongekoppelde betalingen ({unlinkedPayments.length})
+          </span>
+          <span
+            onClick={(e) => { e.stopPropagation(); setShowNewPayment((s) => !s); }}
+            className="text-xs text-slate-400 underline decoration-dotted"
+          >
+            + Nieuwe betaling
+          </span>
+        </button>
 
         {showNewPayment && (
           <div className="bg-white border border-slate-200 rounded-xl p-3 mb-2 space-y-2">
@@ -2952,7 +3042,7 @@ function KoppelenView({
           </div>
         )}
 
-        {unlinkedPayments.length === 0 ? (
+        {showUnlinkedPayments && (unlinkedPayments.length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-4 bg-white border border-slate-200 rounded-xl">Niets openstaand.</p>
         ) : (
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
@@ -3037,16 +3127,22 @@ function KoppelenView({
               );
             })}
           </div>
-        )}
+        ))}
       </div>
 
       {/* Sectie 2: Documenten */}
       <div>
-        <p className="text-xs font-medium text-slate-500 mb-1.5">
-          Ongekoppelde documenten ({unlinkedDocs.length})
-          {selectedPayment && <span className="text-slate-400 font-normal"> — klik om te koppelen aan "{selectedPayment.description}"</span>}
-        </p>
-        {unlinkedDocs.length === 0 ? (
+        <button
+          onClick={() => setShowUnlinkedDocs((s) => !s)}
+          className="w-full flex items-center gap-1 mb-1.5 text-left"
+        >
+          <ChevronDown className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showUnlinkedDocs ? "rotate-180" : ""}`} />
+          <p className="text-xs font-medium text-slate-500">
+            Ongekoppelde documenten ({unlinkedDocs.length})
+            {selectedPayment && <span className="text-slate-400 font-normal"> — klik om te koppelen aan "{selectedPayment.description}"</span>}
+          </p>
+        </button>
+        {showUnlinkedDocs && (unlinkedDocs.length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-4 bg-white border border-slate-200 rounded-xl">Niets openstaand.</p>
         ) : (
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
@@ -3074,7 +3170,7 @@ function KoppelenView({
               );
             })}
           </div>
-        )}
+        ))}
       </div>
 
       {/* Sectie 3: Gekoppelde betalingen — corrigeer een foute koppeling */}
