@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.28.0";
+const APP_VERSION = "1.29.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1106,8 +1106,8 @@ export default function CashflowPlanner() {
         source: draft.source, // "Cash-handmatig" | "Andere-bank-handmatig"
         bankRef: "",
         raw: null,
-        categoryId: null,
-        projectId: null,
+        categoryId: draft.categoryId || null,
+        projectId: draft.projectId || null,
         documentIds: [],
         noDocumentNeeded: false,
       });
@@ -2200,6 +2200,8 @@ export default function CashflowPlanner() {
             counterpartyById={counterpartyById}
             filteredEntityIds={filteredEntityIds}
             activeEntity={activeEntity}
+            categories={categories}
+            projects={projects}
             onLink={linkPaymentToDocument}
             onUnlink={unlinkPaymentFromDocument}
             onToggleNoDocNeeded={toggleNoDocumentNeeded}
@@ -2884,7 +2886,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 }
 
 function KoppelenView({
-  items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity,
+  items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity, categories, projects,
   onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill,
 }) {
   const [selectedPaymentId, setSelectedPaymentId] = useState(null);
@@ -2892,10 +2894,12 @@ function KoppelenView({
   const [showUnlinkedPayments, setShowUnlinkedPayments] = useState(true);
   const [showUnlinkedDocs, setShowUnlinkedDocs] = useState(true);
   const [showNewPayment, setShowNewPayment] = useState(false);
-  const [newPayment, setNewPayment] = useState({
+  const emptyNewPayment = {
     description: "", date: todayISO(), amount: "", direction: "uit",
     entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig",
-  });
+    categoryId: "", projectId: "",
+  };
+  const [newPayment, setNewPayment] = useState(emptyNewPayment);
   const [adding, setAdding] = useState(false);
   const [creatingDocForId, setCreatingDocForId] = useState(null);
   const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
@@ -3011,6 +3015,26 @@ function KoppelenView({
                 <option value="Andere-bank-handmatig">Andere bank</option>
               </select>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={newPayment.categoryId}
+                onChange={(e) => setNewPayment({ ...newPayment, categoryId: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              >
+                <option value="">Categorie (optioneel)…</option>
+                {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select
+                value={newPayment.projectId}
+                onChange={(e) => setNewPayment({ ...newPayment, projectId: e.target.value })}
+                className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              >
+                <option value="">Project (optioneel)…</option>
+                {(projects || [])
+                  .filter((p) => !newPayment.entityId || p.entityId === newPayment.entityId)
+                  .map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
             <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs">
               <button
                 onClick={() => setNewPayment({ ...newPayment, direction: "uit" })}
@@ -3032,7 +3056,7 @@ function KoppelenView({
                 await onAddManualPayment(newPayment);
                 setAdding(false);
                 setShowNewPayment(false);
-                setNewPayment({ description: "", date: todayISO(), amount: "", direction: "uit", entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig" });
+                setNewPayment({ ...emptyNewPayment, entityId: activeEntity !== "all" ? activeEntity : "" });
               }}
               disabled={!newPayment.entityId || !newPayment.amount || adding}
               className="w-full bg-slate-900 text-white rounded-lg py-2 text-xs font-medium disabled:opacity-40"
@@ -3968,4 +3992,3 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
     </div>
   );
 }
-
