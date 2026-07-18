@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.31.0";
+const APP_VERSION = "1.32.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2183,6 +2183,7 @@ export default function CashflowPlanner() {
             onRelink={relinkBankEntry}
             onMerge={mergeDuplicateItem}
             onLinkPayment={linkPaymentToDocument}
+            onUnlinkPayment={unlinkPaymentFromDocument}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -3568,7 +3569,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
@@ -3592,6 +3593,11 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   }, [jumpToCounterpartyId]);
 
   const scoped = items.filter((it) => filteredEntityIds.includes(it.entityId));
+  const paymentById = useMemo(() => {
+    const m = {};
+    (payments || []).forEach((p) => (m[p.id] = p));
+    return m;
+  }, [payments]);
 
   const groups = useMemo(() => {
     const byId = {};
@@ -3842,6 +3848,31 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                               {item.note}
                             </p>
                           )}
+                          {(item.paymentIds || []).length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {item.paymentIds.map((pid) => {
+                                const linkedPayment = paymentById[pid];
+                                return (
+                                  <div key={pid} className="flex items-center gap-1.5 text-[11px]">
+                                    <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                                    <span className="text-emerald-700 truncate">
+                                      {linkedPayment
+                                        ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
+                                        : "(betaling niet gevonden)"}
+                                    </span>
+                                    {linkedPayment && (
+                                      <button
+                                        onClick={() => onUnlinkPayment(linkedPayment, item.id)}
+                                        className="text-rose-400 underline decoration-dotted shrink-0"
+                                      >
+                                        ontkoppel
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                         <p className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                           {isIn ? "+" : "−"}{eur(item.amount)}
@@ -4036,6 +4067,31 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         )}
                       </div>
                       <p className="text-sm truncate text-slate-800">{item.description}</p>
+                      {(item.paymentIds || []).length > 0 && (
+                        <div className="mt-1 space-y-0.5">
+                          {item.paymentIds.map((pid) => {
+                            const linkedPayment = paymentById[pid];
+                            return (
+                              <div key={pid} className="flex items-center gap-1.5 text-[11px]">
+                                <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                                <span className="text-emerald-700 truncate">
+                                  {linkedPayment
+                                    ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
+                                    : "(betaling niet gevonden)"}
+                                </span>
+                                {linkedPayment && (
+                                  <button
+                                    onClick={() => onUnlinkPayment(linkedPayment, item.id)}
+                                    className="text-rose-400 underline decoration-dotted shrink-0"
+                                  >
+                                    ontkoppel
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                     <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                       {isIn ? "+" : "−"}{eur(item.amount)}
