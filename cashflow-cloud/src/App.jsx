@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.32.0";
+const APP_VERSION = "1.33.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2032,7 +2032,8 @@ export default function CashflowPlanner() {
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                           onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
-                          onCounterpartyClick={goToCounterparty} />
+                          onCounterpartyClick={goToCounterparty}
+                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -2083,7 +2084,8 @@ export default function CashflowPlanner() {
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                           onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
-                          onCounterpartyClick={goToCounterparty} />
+                          onCounterpartyClick={goToCounterparty}
+                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -2120,7 +2122,8 @@ export default function CashflowPlanner() {
                       <ItemRow row={r} entity={entityById[r.item.entityId]}
                         counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                         onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
-                        onCounterpartyClick={goToCounterparty} />
+                        onCounterpartyClick={goToCounterparty}
+                        payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
                       {editingId === r.itemId && (
                         <ItemForm
                           form={form}
@@ -2378,10 +2381,19 @@ function SummaryCard({ label, value, tone, isCount }) {
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  const [chosenPaymentId, setChosenPaymentId] = useState("");
+  const [linking, setLinking] = useState(false);
+  const paymentIds = row.item.paymentIds || [];
+  const linkCandidates = (payments || [])
+    .filter((p) => p.entityId === row.item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
   return (
+    <>
     <div className={`flex items-center gap-2.5 bg-white border rounded-lg px-3 py-2.5 ${overdue ? "border-rose-200" : "border-slate-200"}`}>
       <button
         onClick={() => onTogglePaid(row.itemId, row.date)}
@@ -2435,6 +2447,31 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
             {row.item.note}
           </p>
         )}
+        {paymentIds.length > 0 && (
+          <div className="mt-1 space-y-0.5">
+            {paymentIds.map((pid) => {
+              const linkedPayment = (payments || []).find((p) => p.id === pid);
+              return (
+                <div key={pid} className="flex items-center gap-1.5 text-[11px]">
+                  <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                  <span className="text-emerald-700 truncate">
+                    {linkedPayment
+                      ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
+                      : "(betaling niet gevonden)"}
+                  </span>
+                  {linkedPayment && onUnlinkPayment && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onUnlinkPayment(linkedPayment, row.itemId); }}
+                      className="text-rose-400 underline decoration-dotted shrink-0"
+                    >
+                      ontkoppel
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="text-right shrink-0">
@@ -2444,6 +2481,15 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
+        {paymentIds.length === 0 && onLinkPayment && (
+          <button
+            onClick={() => { setLinkPickerOpen((s) => !s); setChosenPaymentId(""); }}
+            className="p-1 text-slate-300 hover:text-slate-600"
+            title="Koppel aan een betaling"
+          >
+            <Link2 className="w-3.5 h-3.5" />
+          </button>
+        )}
         <button onClick={() => onEdit(row.item)} className="p-1 text-slate-300 hover:text-slate-600">
           <Edit2 className="w-3.5 h-3.5" />
         </button>
@@ -2455,6 +2501,46 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         </button>
       </div>
     </div>
+    {linkPickerOpen && (
+      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2.5 -mt-1 space-y-2">
+        {linkCandidates.length === 0 ? (
+          <p className="text-[11px] text-slate-400">Geen ongekoppelde betalingen gevonden voor deze boekhouding.</p>
+        ) : (
+          <>
+            <select
+              value={chosenPaymentId}
+              onChange={(e) => setChosenPaymentId(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            >
+              <option value="" disabled>Kies de juiste betaling…</option>
+              {linkCandidates.map((p) => (
+                <option key={p.id} value={p.id}>{p.description} — {eur(p.amount)} ({p.date})</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  const payment = linkCandidates.find((p) => p.id === chosenPaymentId);
+                  if (!payment) return;
+                  setLinking(true);
+                  await onLinkPayment(payment, row.item);
+                  setLinking(false);
+                  setLinkPickerOpen(false);
+                }}
+                disabled={!chosenPaymentId || linking}
+                className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+              >
+                {linking ? "Bezig…" : "Bevestig koppeling"}
+              </button>
+              <button onClick={() => setLinkPickerOpen(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                Annuleer
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )}
+    </>
   );
 }
 
