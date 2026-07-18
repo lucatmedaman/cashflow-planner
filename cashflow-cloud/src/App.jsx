@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.29.0";
+const APP_VERSION = "1.30.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2889,7 +2889,11 @@ function KoppelenView({
   items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity, categories, projects,
   onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill,
 }) {
-  const [selectedPaymentId, setSelectedPaymentId] = useState(null);
+  // Koppelen kan vanuit beide kanten starten: klik eerst een betaling (dan
+  // markeer je daarna het passende document), of omgekeerd — klik eerst een
+  // document, en markeer daarna de passende betaling. `selection` onthoudt
+  // welke kant als eerste is aangeklikt.
+  const [selection, setSelection] = useState(null); // { type: "payment" | "doc", id }
   const [showLinked, setShowLinked] = useState(false);
   const [showUnlinkedPayments, setShowUnlinkedPayments] = useState(true);
   const [showUnlinkedDocs, setShowUnlinkedDocs] = useState(true);
@@ -2923,7 +2927,8 @@ function KoppelenView({
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length > 0)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
 
-  const selectedPayment = unlinkedPayments.find((p) => p.id === selectedPaymentId) || null;
+  const selectedPayment = selection?.type === "payment" ? unlinkedPayments.find((p) => p.id === selection.id) || null : null;
+  const selectedDoc = selection?.type === "doc" ? unlinkedDocs.find((d) => d.id === selection.id) || null : null;
 
   return (
     <div className="mt-4 space-y-4">
@@ -2964,6 +2969,7 @@ function KoppelenView({
           <span className="flex items-center gap-1 text-xs font-medium text-slate-500">
             <ChevronDown className={`w-3.5 h-3.5 text-slate-300 transition-transform ${showUnlinkedPayments ? "rotate-180" : ""}`} />
             Ongekoppelde betalingen ({unlinkedPayments.length})
+            {selectedDoc && <span className="text-slate-400 font-normal"> — klik om te koppelen aan "{selectedDoc.description}"</span>}
           </span>
           <span
             onClick={(e) => { e.stopPropagation(); setShowNewPayment((s) => !s); }}
@@ -3072,12 +3078,19 @@ function KoppelenView({
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
             {unlinkedPayments.map((p) => {
               const entity = entityById[p.entityId];
-              const selected = selectedPaymentId === p.id;
+              const selected = selection?.type === "payment" && selection.id === p.id;
               const isCreatingDocRow = creatingDocForId === p.id;
               return (
                 <React.Fragment key={p.id}>
                 <div
-                  onClick={() => setSelectedPaymentId(selected ? null : p.id)}
+                  onClick={async () => {
+                    if (selectedDoc) {
+                      await onLink(p, selectedDoc);
+                      setSelection(null);
+                      return;
+                    }
+                    setSelection(selected ? null : { type: "payment", id: p.id });
+                  }}
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer ${selected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
@@ -3173,15 +3186,19 @@ function KoppelenView({
             {unlinkedDocs.map((doc) => {
               const entity = entityById[doc.entityId];
               const cp = doc.counterpartyId ? counterpartyById[doc.counterpartyId] : null;
+              const docSelected = selection?.type === "doc" && selection.id === doc.id;
               return (
                 <div
                   key={doc.id}
                   onClick={async () => {
-                    if (!selectedPayment) return;
-                    await onLink(selectedPayment, doc);
-                    setSelectedPaymentId(null);
+                    if (selectedPayment) {
+                      await onLink(selectedPayment, doc);
+                      setSelection(null);
+                      return;
+                    }
+                    setSelection(docSelected ? null : { type: "doc", id: doc.id });
                   }}
-                  className={`flex items-center gap-2.5 px-3.5 py-2.5 ${selectedPayment ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50 ${docSelected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-slate-800 truncate">{doc.description}{cp ? ` — ${cp.name}` : ""}</p>
