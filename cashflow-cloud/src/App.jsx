@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Building2, ChevronDown, X, Edit2, Copy,
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
-  Download, Upload, Loader2, RefreshCw, Landmark
+  Download, Upload, Loader2, RefreshCw, Landmark, Link2
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.30.0";
+const APP_VERSION = "1.31.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2158,6 +2158,7 @@ export default function CashflowPlanner() {
         ) : view === "crediteuren" ? (
           <CounterpartyView
             items={items}
+            payments={payments}
             counterparties={counterparties}
             entities={sortedEntities}
             entityById={entityById}
@@ -2181,6 +2182,7 @@ export default function CashflowPlanner() {
             onJumpHandled={() => setJumpToCounterpartyId(null)}
             onRelink={relinkBankEntry}
             onMerge={mergeDuplicateItem}
+            onLinkPayment={linkPaymentToDocument}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -3566,10 +3568,13 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
+  const [linkingItemId, setLinkingItemId] = useState(null);
+  const [linkPaymentId, setLinkPaymentId] = useState("");
+  const [linking, setLinking] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState(null);
   const [showMappings, setShowMappings] = useState(false);
@@ -3842,8 +3847,17 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                           {isIn ? "+" : "−"}{eur(item.amount)}
                         </p>
                         <div className="flex items-center gap-0.5 shrink-0">
+                          {(item.paymentIds || []).length === 0 && (
+                            <button
+                              onClick={() => { setLinkingItemId(linkingItemId === item.id ? null : item.id); setLinkPaymentId(""); setRelinkingId(null); }}
+                              className="p-1 text-slate-300 hover:text-slate-600"
+                              title="Koppel aan een betaling"
+                            >
+                              <Link2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button
-                            onClick={() => { setRelinkingId(relinkingId === item.id ? null : item.id); setRelinkTargetId(""); }}
+                            onClick={() => { setRelinkingId(relinkingId === item.id ? null : item.id); setRelinkTargetId(""); setLinkingItemId(null); }}
                             className="p-1 text-slate-300 hover:text-slate-600"
                             title={item.source === "Handmatig" ? "Samenvoegen met een andere post" : "Klopt de koppeling niet? Herkoppelen"}
                           >
@@ -3860,6 +3874,50 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                           </button>
                         </div>
                       </div>
+                      {linkingItemId === item.id && (() => {
+                        const candidates = (payments || [])
+                          .filter((p) => p.entityId === item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
+                          .sort((a, b) => (a.date < b.date ? 1 : -1));
+                        return (
+                          <div className="px-3.5 pb-3.5 space-y-2">
+                            {candidates.length === 0 ? (
+                              <p className="text-[11px] text-slate-400">Geen ongekoppelde betalingen gevonden voor deze boekhouding.</p>
+                            ) : (
+                              <>
+                                <select
+                                  value={linkPaymentId}
+                                  onChange={(e) => setLinkPaymentId(e.target.value)}
+                                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                                >
+                                  <option value="" disabled>Kies de juiste betaling…</option>
+                                  {candidates.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.description} — {eur(p.amount)} ({p.date})</option>
+                                  ))}
+                                </select>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={async () => {
+                                      const payment = candidates.find((p) => p.id === linkPaymentId);
+                                      if (!payment) return;
+                                      setLinking(true);
+                                      await onLinkPayment(payment, item);
+                                      setLinking(false);
+                                      setLinkingItemId(null);
+                                    }}
+                                    disabled={!linkPaymentId || linking}
+                                    className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                                  >
+                                    {linking ? "Bezig…" : "Bevestig koppeling"}
+                                  </button>
+                                  <button onClick={() => setLinkingItemId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                                    Annuleer
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {relinkingId === item.id && (() => {
                         const isManual = item.source === "Handmatig";
                         let snapshot = null;
@@ -3982,10 +4040,63 @@ function CounterpartyView({ items, counterparties, entities, entityById, filtere
                     <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                       {isIn ? "+" : "−"}{eur(item.amount)}
                     </span>
+                    {(item.paymentIds || []).length === 0 && (
+                      <button
+                        onClick={() => { setLinkingItemId(linkingItemId === item.id ? null : item.id); setLinkPaymentId(""); }}
+                        className="p-1 text-slate-300 hover:text-slate-600 shrink-0"
+                        title="Koppel aan een betaling"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button onClick={() => onEdit(item)} className="p-1 text-slate-300 hover:text-slate-600 shrink-0">
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                  {linkingItemId === item.id && (() => {
+                    const candidates = (payments || [])
+                      .filter((p) => p.entityId === item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
+                      .sort((a, b) => (a.date < b.date ? 1 : -1));
+                    return (
+                      <div className="px-3.5 pb-3.5 space-y-2">
+                        {candidates.length === 0 ? (
+                          <p className="text-[11px] text-slate-400">Geen ongekoppelde betalingen gevonden voor deze boekhouding.</p>
+                        ) : (
+                          <>
+                            <select
+                              value={linkPaymentId}
+                              onChange={(e) => setLinkPaymentId(e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                            >
+                              <option value="" disabled>Kies de juiste betaling…</option>
+                              {candidates.map((p) => (
+                                <option key={p.id} value={p.id}>{p.description} — {eur(p.amount)} ({p.date})</option>
+                              ))}
+                            </select>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  const payment = candidates.find((p) => p.id === linkPaymentId);
+                                  if (!payment) return;
+                                  setLinking(true);
+                                  await onLinkPayment(payment, item);
+                                  setLinking(false);
+                                  setLinkingItemId(null);
+                                }}
+                                disabled={!linkPaymentId || linking}
+                                className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                              >
+                                {linking ? "Bezig…" : "Bevestig koppeling"}
+                              </button>
+                              <button onClick={() => setLinkingItemId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                                Annuleer
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {editingId === item.id && (
                     <div className="px-3.5 pb-3.5">
                       <ItemForm
