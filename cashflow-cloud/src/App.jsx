@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.34.0";
+const APP_VERSION = "1.35.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1844,6 +1844,12 @@ export default function CashflowPlanner() {
                 Koppelen
               </button>
               <button
+                onClick={() => setView("betalingen")}
+                className={`px-3 py-1.5 rounded-full transition ${view === "betalingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                Betalingen
+              </button>
+              <button
                 onClick={() => setView("boekhoudingen")}
                 className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
@@ -2228,6 +2234,16 @@ export default function CashflowPlanner() {
             onDeletePayment={deletePayment}
             onBackfill={backfillHistoricBankPayments}
             onOpenDetail={openDetail}
+          />
+        ) : view === "betalingen" ? (
+          <BetalingenView
+            payments={payments}
+            entityById={entityById}
+            filteredEntityIds={filteredEntityIds}
+            categories={categories}
+            projects={projects}
+            onOpenDetail={openDetail}
+            onDeletePayment={deletePayment}
           />
         ) : (
           <BoekhoudingenView
@@ -4496,6 +4512,118 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, ca
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Los overzicht van ALLE Betaling-records, ongeacht koppelstatus — inclusief
+// betalingen met "geen document nodig", die in het Koppelen-scherm nergens
+// verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
+// vallen.
+function BetalingenView({ payments, entityById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment }) {
+  const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
+
+  function statusOf(p) {
+    if ((p.documentIds || []).length > 0) return "linked";
+    if (p.noDocumentNeeded) return "nodoc";
+    return "unlinked";
+  }
+
+  const scoped = payments.filter((p) => filteredEntityIds.includes(p.entityId));
+  const filtered = scoped
+    .filter((p) => statusFilter === "all" || statusOf(p) === statusFilter)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const counts = {
+    all: scoped.length,
+    linked: scoped.filter((p) => statusOf(p) === "linked").length,
+    unlinked: scoped.filter((p) => statusOf(p) === "unlinked").length,
+    nodoc: scoped.filter((p) => statusOf(p) === "nodoc").length,
+  };
+  const totalIn = filtered.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
+  const totalUit = filtered.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
+
+  const FILTERS = [
+    { key: "all", label: "Alle" },
+    { key: "linked", label: "Gekoppeld" },
+    { key: "unlinked", label: "Ongekoppeld" },
+    { key: "nodoc", label: "Geen document nodig" },
+  ];
+
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-xs text-slate-400">Alle betalingen uit de Betalingen-tabel, ongeacht of ze aan een document gekoppeld zijn.</p>
+
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setStatusFilter(f.key)}
+            className={`shrink-0 px-2.5 py-1.5 rounded-full text-xs border transition ${
+              statusFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"
+            }`}
+          >
+            {f.label} ({counts[f.key]})
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <SummaryCard label="Aantal" value={filtered.length} tone="pos" isCount />
+        <SummaryCard label="Totaal in" value={totalIn} tone="pos" />
+        <SummaryCard label="Totaal uit" value={totalUit} tone="neg" />
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-10">Geen betalingen in deze selectie.</p>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
+          {filtered.map((p) => {
+            const entity = entityById[p.entityId];
+            const status = statusOf(p);
+            const category = p.categoryId ? (categories || []).find((c) => c.id === p.categoryId) : null;
+            const project = p.projectId ? (projects || []).find((pr) => pr.id === p.projectId) : null;
+            return (
+              <div
+                key={p.id}
+                onClick={() => onOpenDetail("payment", p.id)}
+                className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                    <span
+                      className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
+                        status === "linked"
+                          ? "bg-emerald-50 text-emerald-600"
+                          : status === "nodoc"
+                          ? "bg-slate-100 text-slate-500"
+                          : "bg-amber-50 text-amber-600"
+                      }`}
+                    >
+                      {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {entity?.name} · {p.date} · {p.source}
+                    {category && <> · {category.name}</>}
+                    {project && <> · {project.name}</>}
+                  </p>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
+                  className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
+                >
+                  verwijder
+                </button>
+                <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                  {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
