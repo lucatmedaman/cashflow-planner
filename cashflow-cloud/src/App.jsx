@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Building2, ChevronDown, X, Edit2, Copy,
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
-  Download, Upload, Loader2, RefreshCw, Landmark, Link2
+  Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.33.0";
+const APP_VERSION = "1.34.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -463,6 +463,13 @@ export default function CashflowPlanner() {
   const fileInputRef = useRef(null);
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
+  // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
+  // scherm (Planning, Crediteuren, Koppelen) geopend worden om alle velden
+  // van één post of betaling te bekijken, met doorklikbare koppelingen.
+  const [detailTarget, setDetailTarget] = useState(null);
+  function openDetail(type, id) {
+    setDetailTarget({ type, id });
+  }
   const [copyMsg, setCopyMsg] = useState("");
 
   const bankFileInputRef = useRef(null);
@@ -2033,7 +2040,8 @@ export default function CashflowPlanner() {
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                           onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
                           onCounterpartyClick={goToCounterparty}
-                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
+                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                          onOpenDetail={openDetail} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -2085,7 +2093,8 @@ export default function CashflowPlanner() {
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                           onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                           onCounterpartyClick={goToCounterparty}
-                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
+                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                          onOpenDetail={openDetail} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -2123,7 +2132,8 @@ export default function CashflowPlanner() {
                         counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
                         onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                         onCounterpartyClick={goToCounterparty}
-                        payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument} />
+                        payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                        onOpenDetail={openDetail} />
                       {editingId === r.itemId && (
                         <ItemForm
                           form={form}
@@ -2187,6 +2197,7 @@ export default function CashflowPlanner() {
             onMerge={mergeDuplicateItem}
             onLinkPayment={linkPaymentToDocument}
             onUnlinkPayment={unlinkPaymentFromDocument}
+            onOpenDetail={openDetail}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -2216,6 +2227,7 @@ export default function CashflowPlanner() {
             onResolveCounterparty={resolveCounterpartyId}
             onDeletePayment={deletePayment}
             onBackfill={backfillHistoricBankPayments}
+            onOpenDetail={openDetail}
           />
         ) : (
           <BoekhoudingenView
@@ -2363,6 +2375,25 @@ export default function CashflowPlanner() {
         </div>
       )}
 
+      {/* Detailscherm (post of betaling) */}
+      {detailTarget && (
+        <DetailModal
+          target={detailTarget}
+          items={items}
+          payments={payments}
+          entityById={entityById}
+          counterpartyById={counterpartyById}
+          categories={categories}
+          projects={projects}
+          onClose={() => setDetailTarget(null)}
+          onOpenDetail={openDetail}
+          onEditItem={(item) => { startEdit(item); setView("planning"); setDetailTarget(null); }}
+          onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
+          onUnlinkPayment={unlinkPaymentFromDocument}
+          onDeletePayment={async (payment) => { await deletePayment(payment); setDetailTarget(null); }}
+        />
+      )}
+
     </div>
   );
 }
@@ -2381,7 +2412,7 @@ function SummaryCard({ label, value, tone, isCount }) {
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment, onOpenDetail }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -2454,11 +2485,14 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
               return (
                 <div key={pid} className="flex items-center gap-1.5 text-[11px]">
                   <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                  <span className="text-emerald-700 truncate">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenDetail?.("payment", pid); }}
+                    className="text-emerald-700 truncate underline decoration-dotted text-left"
+                  >
                     {linkedPayment
                       ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
                       : "(betaling niet gevonden)"}
-                  </span>
+                  </button>
                   {linkedPayment && onUnlinkPayment && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onUnlinkPayment(linkedPayment, row.itemId); }}
@@ -2481,6 +2515,11 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
+        {onOpenDetail && (
+          <button onClick={() => onOpenDetail("item", row.itemId)} className="p-1 text-slate-300 hover:text-slate-600" title="Alle details bekijken">
+            <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
         {paymentIds.length === 0 && onLinkPayment && (
           <button
             onClick={() => { setLinkPickerOpen((s) => !s); setChosenPaymentId(""); }}
@@ -2976,7 +3015,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity, categories, projects,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail,
 }) {
   // Koppelen kan vanuit beide kanten starten: klik eerst een betaling (dan
   // markeer je daarna het passende document), of omgekeerd — klik eerst een
@@ -3191,6 +3230,12 @@ function KoppelenView({
                   </span>
                   <div className="flex flex-col items-end gap-0.5 shrink-0">
                     <button
+                      onClick={(e) => { e.stopPropagation(); onOpenDetail?.("payment", p.id); }}
+                      className="text-[10px] text-slate-500 underline decoration-dotted"
+                    >
+                      details
+                    </button>
+                    <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setCreatingDocForId(isCreatingDocRow ? null : p.id);
@@ -3296,6 +3341,13 @@ function KoppelenView({
                   <span className={`text-sm font-medium shrink-0 ${doc.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {doc.direction === "in" ? "+" : "−"}{eur(doc.amount)}
                   </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenDetail?.("item", doc.id); }}
+                    className="p-1 text-slate-300 hover:text-slate-600 shrink-0"
+                    title="Alle details bekijken"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               );
             })}
@@ -3323,7 +3375,12 @@ function KoppelenView({
                   <div key={p.id} className="px-3.5 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                        <button
+                          onClick={() => onOpenDetail?.("payment", p.id)}
+                          className="text-sm text-slate-800 truncate underline decoration-dotted text-left"
+                        >
+                          {p.description}
+                        </button>
                         <p className="text-[11px] text-slate-400">{entity?.name} · {p.date}</p>
                       </div>
                       <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3341,9 +3398,12 @@ function KoppelenView({
                         const doc = items.find((i) => i.id === docId);
                         return (
                           <div key={docId} className="flex items-center justify-between bg-slate-50 rounded-md px-2 py-1.5">
-                            <span className="text-[11px] text-slate-600 truncate">
+                            <button
+                              onClick={() => onOpenDetail?.("item", docId)}
+                              className="text-[11px] text-slate-600 truncate underline decoration-dotted text-left"
+                            >
                               → {doc ? doc.description : "(document niet gevonden)"}
-                            </span>
+                            </button>
                             <button
                               onClick={() => onUnlink(p, docId)}
                               className="text-[10px] text-rose-500 underline decoration-dotted shrink-0 ml-2"
@@ -3655,7 +3715,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
@@ -3941,11 +4001,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                                 return (
                                   <div key={pid} className="flex items-center gap-1.5 text-[11px]">
                                     <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                                    <span className="text-emerald-700 truncate">
+                                    <button
+                                      onClick={() => onOpenDetail?.("payment", pid)}
+                                      className="text-emerald-700 truncate underline decoration-dotted text-left"
+                                    >
                                       {linkedPayment
                                         ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
                                         : "(betaling niet gevonden)"}
-                                    </span>
+                                    </button>
                                     {linkedPayment && (
                                       <button
                                         onClick={() => onUnlinkPayment(linkedPayment, item.id)}
@@ -3964,6 +4027,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           {isIn ? "+" : "−"}{eur(item.amount)}
                         </p>
                         <div className="flex items-center gap-0.5 shrink-0">
+                          <button onClick={() => onOpenDetail?.("item", item.id)} className="p-1 text-slate-300 hover:text-slate-600" title="Alle details bekijken">
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
                           {(item.paymentIds || []).length === 0 && (
                             <button
                               onClick={() => { setLinkingItemId(linkingItemId === item.id ? null : item.id); setLinkPaymentId(""); setRelinkingId(null); }}
@@ -4160,11 +4226,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                             return (
                               <div key={pid} className="flex items-center gap-1.5 text-[11px]">
                                 <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                                <span className="text-emerald-700 truncate">
+                                <button
+                                  onClick={() => onOpenDetail?.("payment", pid)}
+                                  className="text-emerald-700 truncate underline decoration-dotted text-left"
+                                >
                                   {linkedPayment
                                     ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
                                     : "(betaling niet gevonden)"}
-                                </span>
+                                </button>
                                 {linkedPayment && (
                                   <button
                                     onClick={() => onUnlinkPayment(linkedPayment, item.id)}
@@ -4182,6 +4251,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     <span className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                       {isIn ? "+" : "−"}{eur(item.amount)}
                     </span>
+                    <button onClick={() => onOpenDetail?.("item", item.id)} className="p-1 text-slate-300 hover:text-slate-600 shrink-0" title="Alle details bekijken">
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
                     {(item.paymentIds || []).length === 0 && (
                       <button
                         onClick={() => { setLinkingItemId(linkingItemId === item.id ? null : item.id); setLinkPaymentId(""); }}
@@ -4259,6 +4331,171 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Pop-up met alle velden van één post (document) of één betaling — bereikbaar
+// via het oog-icoontje / "details"-link in Planning, Crediteuren en Koppelen.
+// Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
+// zodat je zonder tabwissel van een betaling naar het document kan springen
+// (of omgekeerd), inclusief ontkoppel-actie.
+function DetailModal({ target, items, payments, entityById, counterpartyById, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment }) {
+  const { type, id } = target;
+  const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
+
+  if (!record) {
+    return (
+      <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-40" onClick={onClose}>
+        <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[28rem]" onClick={(e) => e.stopPropagation()}>
+          <p className="text-sm text-slate-500">Record niet gevonden — mogelijk ondertussen verwijderd of ontkoppeld.</p>
+          <button onClick={onClose} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm">Sluiten</button>
+        </div>
+      </div>
+    );
+  }
+
+  const entity = entityById[record.entityId];
+  const category = record.categoryId ? (categories || []).find((c) => c.id === record.categoryId) : null;
+  const project = record.projectId ? (projects || []).find((p) => p.id === record.projectId) : null;
+
+  let snapshot = null;
+  if (type === "item" && record.bankSnapshot) {
+    try { snapshot = JSON.parse(record.bankSnapshot); } catch (e) {}
+  }
+
+  function Row({ label, value }) {
+    if (value === null || value === undefined || value === "") return null;
+    return (
+      <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+        <span className="text-[11px] text-slate-400 shrink-0">{label}</span>
+        <span className="text-xs text-slate-700 text-right break-words">{value}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-40" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[30rem] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-medium text-slate-900 flex items-center gap-2">
+            {type === "item" ? <FileText className="w-4 h-4" /> : <Landmark className="w-4 h-4" />}
+            {type === "item" ? "Post — details" : "Betaling — details"}
+          </h3>
+          <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+
+        <div>
+          <Row label="Omschrijving" value={record.description} />
+          <Row label="Boekhouding" value={entity?.name} />
+          {type === "item" && (
+            <Row label="Debiteur/crediteur" value={record.counterpartyId ? counterpartyById[record.counterpartyId]?.name : null} />
+          )}
+          <Row label="Bedrag" value={`${record.direction === "in" ? "+" : "−"}${eur(record.amount)}`} />
+          <Row label="Richting" value={record.direction === "in" ? "Inkomst" : "Uitgave"} />
+          {type === "item" ? (
+            <>
+              <Row label="Vervaldatum" value={record.dueDate} />
+              <Row label="Betaaldatum" value={record.payDate} />
+              <Row label="Factuurdatum" value={record.invoiceDate} />
+              <Row label="Herhaling" value={RECURRENCE_OPTIONS.find((o) => o.value === record.recurrence)?.label} />
+              <Row label="Einddatum" value={record.endDate} />
+              <Row label="Rekeningnummer" value={record.accountNumber} />
+              <Row label="Opmerking" value={record.note} />
+              <Row label="Via PayPal" value={record.viaPaypal ? "Ja" : null} />
+              <Row label="Gelezen" value={record.read ? "Ja" : "Nee"} />
+              <Row label="Betaalde data" value={(record.paidDates || []).length > 0 ? record.paidDates.join(", ") : null} />
+            </>
+          ) : (
+            <Row label="Datum" value={record.date} />
+          )}
+          <Row label="Bron" value={record.source} />
+          <Row label={type === "item" ? "BankRef" : "Bankreferentie"} value={record.bankRef} />
+          <Row label="Categorie" value={category?.name} />
+          <Row label="Project" value={project?.name} />
+          {type === "payment" && <Row label="Geen document nodig" value={record.noDocumentNeeded ? "Ja" : null} />}
+        </div>
+
+        {snapshot && (
+          <div className="mt-3 bg-slate-50 rounded-lg p-2.5 text-xs space-y-1">
+            <p className="text-slate-500 font-medium mb-1">Ruwe bankgegevens</p>
+            {snapshot.counterpartyName && <p><span className="text-slate-400">Naam bij bank: </span>{snapshot.counterpartyName}</p>}
+            {snapshot.remittance && <p className="break-words"><span className="text-slate-400">Mededeling: </span>{snapshot.remittance}</p>}
+            {snapshot.bookingDate && <p><span className="text-slate-400">Boekingsdatum: </span>{snapshot.bookingDate}</p>}
+            {snapshot.ref && <p><span className="text-slate-400">Referentie: </span>{snapshot.ref}</p>}
+          </div>
+        )}
+
+        {type === "item" && (record.paymentIds || []).length > 0 && (
+          <div className="mt-3">
+            <p className="text-[11px] text-slate-400 mb-1">Gekoppelde betaling(en)</p>
+            {record.paymentIds.map((pid) => {
+              const p = payments.find((pp) => pp.id === pid);
+              return (
+                <div key={pid} className="flex items-center justify-between bg-slate-50 rounded-md px-2 py-1.5 mb-1">
+                  <button
+                    onClick={() => onOpenDetail("payment", pid)}
+                    className="text-xs text-slate-700 underline decoration-dotted text-left truncate"
+                  >
+                    {p ? `${p.description} · ${p.date} · ${eur(p.amount)}` : "(niet gevonden)"}
+                  </button>
+                  {p && (
+                    <button onClick={() => onUnlinkPayment(p, record.id)} className="text-[10px] text-rose-500 underline decoration-dotted shrink-0 ml-2">
+                      ontkoppel
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {type === "payment" && (record.documentIds || []).length > 0 && (
+          <div className="mt-3">
+            <p className="text-[11px] text-slate-400 mb-1">Gekoppeld(e) document(en)</p>
+            {record.documentIds.map((did) => {
+              const it = items.find((ii) => ii.id === did);
+              return (
+                <div key={did} className="flex items-center justify-between bg-slate-50 rounded-md px-2 py-1.5 mb-1">
+                  <button
+                    onClick={() => onOpenDetail("item", did)}
+                    className="text-xs text-slate-700 underline decoration-dotted text-left truncate"
+                  >
+                    {it ? it.description : "(niet gevonden)"}
+                  </button>
+                  {it && (
+                    <button onClick={() => onUnlinkPayment(record, did)} className="text-[10px] text-rose-500 underline decoration-dotted shrink-0 ml-2">
+                      ontkoppel
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="text-[10px] text-slate-300 mt-3 font-mono">Airtable ID: {record.id}</p>
+
+        <div className="flex gap-2 mt-4">
+          {type === "item" ? (
+            <>
+              <button onClick={() => onEditItem(record)} className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium">
+                Bewerk
+              </button>
+              <button onClick={() => onDeleteItem(record.id)} className="px-3 rounded-lg border border-rose-200 text-rose-600 text-sm">
+                Verwijder
+              </button>
+            </>
+          ) : (
+            <button onClick={() => onDeletePayment(record)} className="flex-1 border border-rose-200 text-rose-600 rounded-lg py-2 text-sm font-medium">
+              Verwijder betaling
+            </button>
+          )}
+          <button onClick={onClose} className="px-3 rounded-lg border border-slate-200 text-sm">
+            Sluiten
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
