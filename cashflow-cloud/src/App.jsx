@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.36.0";
+const APP_VERSION = "1.37.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1825,7 +1825,7 @@ export default function CashflowPlanner() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      <div className="max-w-3xl mx-auto px-4 pb-28">
+      <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 lg:px-8 pb-28">
         {/* Header */}
         <header className="pt-6 pb-4 sticky top-0 bg-slate-50/95 backdrop-blur z-20">
           <div className="flex items-center justify-between">
@@ -3137,6 +3137,8 @@ function KoppelenView({
         )}
       </div>
 
+      <div className="lg:grid lg:grid-cols-2 lg:gap-4 lg:items-start space-y-4 lg:space-y-0">
+
       {/* Sectie 1: Betalingen */}
       <div>
         <button
@@ -3402,6 +3404,8 @@ function KoppelenView({
             })}
           </div>
         ))}
+      </div>
+
       </div>
 
       {/* Sectie 3: Gekoppelde betalingen — corrigeer een foute koppeling */}
