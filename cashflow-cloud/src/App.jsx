@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.35.0";
+const APP_VERSION = "1.36.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1378,6 +1378,38 @@ export default function CashflowPlanner() {
     return map;
   }, [items]);
 
+  // Vroegste bankverrichting per boekhouding — het spiegelbeeld van
+  // lastUpdateByEntity, maar dan de oudste datum i.p.v. de meest recente.
+  // Enkel Bank-import (niet Billtobox), en enkel op posten: bank-betalingen
+  // zonder gekoppeld document tellen hier niet mee, dat blijft dus een
+  // proxy op basis van wat effectief als post is ingelezen/gematcht.
+  const firstBankStatementByEntity = useMemo(() => {
+    const map = {};
+    items.forEach((item) => {
+      if (item.source !== "Bank-import") return;
+      let date = item.dueDate;
+      if (item.bankSnapshot) {
+        try {
+          const snap = JSON.parse(item.bankSnapshot);
+          if (snap.bookingDate) date = snap.bookingDate;
+        } catch (e) {}
+      }
+      if (!map[item.entityId] || date < map[item.entityId]) {
+        map[item.entityId] = date;
+      }
+    });
+    // Ook betalingen zelf meenemen (niet enkel posten), zodat een boekhouding
+    // waar bank-betalingen nog ongekoppeld in "Koppelen" staan toch een
+    // correcte vroegste datum toont.
+    payments.forEach((p) => {
+      if (p.source !== "Bank-import") return;
+      if (!map[p.entityId] || p.date < map[p.entityId]) {
+        map[p.entityId] = p.date;
+      }
+    });
+    return map;
+  }, [items, payments]);
+
   const filteredEntityIds = activeEntity === "all" ? sortedEntities.map((e) => e.id) : [activeEntity];
 
   // Voor de A-Z-sprongbalk in de Crediteuren-header: eerste crediteur per
@@ -2259,6 +2291,7 @@ export default function CashflowPlanner() {
             onCommitEntityPocketsmith={commitEntityPocketsmith}
             onRemoveEntity={removeEntity}
             lastUpdateByEntity={lastUpdateByEntity}
+            firstBankStatementByEntity={firstBankStatementByEntity}
           />
         )}
       </div>
@@ -3445,7 +3478,7 @@ function BoekhoudingenView({
   entities, newEntityName, setNewEntityName, onAddEntity, onMoveEntity,
   onUpdateOpeningBalanceLocal, onCommitOpeningBalance,
   onUpdateEntityFieldLocal, onCommitEntityIban, onCommitEntityPocketsmith,
-  onRemoveEntity, lastUpdateByEntity,
+  onRemoveEntity, lastUpdateByEntity, firstBankStatementByEntity,
 }) {
   return (
     <div className="mt-4 space-y-4">
@@ -3528,6 +3561,11 @@ function BoekhoudingenView({
                     {lastUpdateByEntity[e.id]?.bank && <>Laatste bank: {lastUpdateByEntity[e.id].bank}</>}
                     {lastUpdateByEntity[e.id]?.bank && lastUpdateByEntity[e.id]?.billtobox && " · "}
                     {lastUpdateByEntity[e.id]?.billtobox && <>Laatste Billtobox: {lastUpdateByEntity[e.id].billtobox}</>}
+                  </p>
+                )}
+                {firstBankStatementByEntity[e.id] && (
+                  <p className="text-[11px] text-slate-400 pl-5 mt-0.5">
+                    Eerste bankafschrift: {firstBankStatementByEntity[e.id]}
                   </p>
                 )}
                 {(e.iban || e.pocketsmithAccount) && e.bankBalance !== null && (
