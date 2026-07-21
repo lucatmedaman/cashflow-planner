@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.45.0";
+const APP_VERSION = "1.46.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -4030,17 +4030,25 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 
   const groups = useMemo(() => {
     const byId = {};
-    counterparties.forEach((c) => { byId[c.id] = { counterparty: c, items: [] }; });
+    counterparties.forEach((c) => { byId[c.id] = { counterparty: c, items: [], payments: [] }; });
     const zonder = [];
     scoped.forEach((it) => {
       if (it.counterpartyId && byId[it.counterpartyId]) byId[it.counterpartyId].items.push(it);
       else zonder.push(it);
     });
+    // Crediteuren die enkel via een Betaling gekend zijn (nog geen post) —
+    // anders zouden ze nergens in dit scherm verschijnen, ook al kan je er
+    // via Betalingen wél naartoe klikken.
+    (payments || [])
+      .filter((p) => filteredEntityIds.includes(p.entityId))
+      .forEach((p) => {
+        if (p.counterpartyId && byId[p.counterpartyId]) byId[p.counterpartyId].payments.push(p);
+      });
     const list = Object.values(byId)
-      .filter((g) => g.items.length > 0)
+      .filter((g) => g.items.length > 0 || g.payments.length > 0)
       .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name));
     return { list, zonder };
-  }, [scoped, counterparties]);
+  }, [scoped, counterparties, payments, filteredEntityIds]);
 
   const mappingBar = (
     <div className="space-y-2">
@@ -4174,9 +4182,13 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
           {applyResult.renamed} hernoemd, {applyResult.merged} samengevoegd.
         </p>
       )}
-      {groups.list.map(({ counterparty, items: cpItems }) => {
-        const totalIn = cpItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0);
-        const totalUit = cpItems.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0);
+      {groups.list.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
+        const totalIn = cpItems.length > 0
+          ? cpItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0)
+          : cpPayments.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
+        const totalUit = cpItems.length > 0
+          ? cpItems.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0)
+          : cpPayments.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
         const open = openId === counterparty.id;
         return (
           <div key={counterparty.id} id={`crediteur-${counterparty.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -4186,7 +4198,11 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             >
               <div>
                 <p className="text-sm font-medium text-slate-800">{counterparty.name}</p>
-                <p className="text-[11px] text-slate-400">{cpItems.length} post{cpItems.length !== 1 ? "en" : ""}</p>
+                <p className="text-[11px] text-slate-400">
+                  {cpItems.length > 0
+                    ? `${cpItems.length} post${cpItems.length !== 1 ? "en" : ""}`
+                    : `${cpPayments.length} betaling${cpPayments.length !== 1 ? "en" : ""}, geen post`}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="text-right text-xs">
@@ -4281,6 +4297,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     </label>
                   </div>
                 )}
+                {cpItems.length > 0 ? (
                 <div className="divide-y divide-slate-50">
                 {cpItems
                   .slice()
@@ -4544,6 +4561,47 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     );
                   })}
                 </div>
+                ) : (
+                  <div className="divide-y divide-slate-50">
+                    {cpPayments
+                      .slice()
+                      .sort((a, b) => (a.date < b.date ? 1 : -1))
+                      .map((p) => {
+                        const entity = entityById[p.entityId];
+                        const isIn = p.direction === "in";
+                        const status = (p.documentIds || []).length > 0 ? "linked" : p.noDocumentNeeded ? "nodoc" : "unlinked";
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => onOpenDetail?.("payment", p.id)}
+                            className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
+                                <span className="text-xs text-slate-400">{p.date}</span>
+                                <span
+                                  className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
+                                    status === "linked" ? "bg-emerald-50 text-emerald-600" : status === "nodoc" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600"
+                                  }`}
+                                >
+                                  {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
+                                </span>
+                              </div>
+                              <p className="text-sm truncate text-slate-800">{p.description}</p>
+                              <p className="text-[11px] text-slate-400 truncate">{p.source}</p>
+                            </div>
+                            <p className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
+                              {isIn ? "+" : "−"}{eur(p.amount)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    <p className="px-3.5 py-2 text-[11px] text-slate-400">
+                      Nog geen post voor deze debiteur/crediteur — enkel betaling(en) hierboven. Klik op een betaling voor details of om ze aan een document te koppelen.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>
