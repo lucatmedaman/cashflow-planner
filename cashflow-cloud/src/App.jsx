@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.49.0";
+const APP_VERSION = "1.50.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1577,13 +1577,28 @@ export default function CashflowPlanner() {
     return m;
   }, [counterparties]);
 
+  // BELANGRIJK: resolveCounterpartyId wordt tientallen/honderden keren na
+  // elkaar aangeroepen binnen één grote import (CAMT.053 met honderden
+  // verrichtingen). Het `counterparties`-state-array is dan een "bevroren"
+  // momentopname van vóór de import — setCounterparties(...) plant een
+  // update, maar de closure van déze functie ziet die pas na een render,
+  // niet meteen bij de volgende aanroep verderop in dezelfde loop. Zonder
+  // ref checkte elke aanroep voor dezelfde naam dus tegen een lijst die de
+  // net-aangemaakte duplicaten van eerder in diezelfde import nog niet
+  // bevatte — vandaar tientallen identiek genaamde crediteuren na een grote
+  // import. counterpartiesRef wordt synchroon bijgewerkt, dus is altijd
+  // actueel binnen één lopende import.
+  const counterpartiesRef = useRef(counterparties);
+  useEffect(() => { counterpartiesRef.current = counterparties; }, [counterparties]);
+
   async function resolveCounterpartyId(rawName) {
     const trimmed = (rawName || "").trim();
     if (!trimmed) return null;
-    const existing = counterparties.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
+    const existing = counterpartiesRef.current.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
     if (existing) return existing.id;
     const [rec] = await atCreate(TABLES.counterparties, [{ fields: { Naam: trimmed } }]);
     const created = counterpartyFromRecord(rec);
+    counterpartiesRef.current = [...counterpartiesRef.current, created];
     setCounterparties((prev) => [...prev, created]);
     return created.id;
   }
