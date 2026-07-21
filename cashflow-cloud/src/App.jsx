@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.43.0";
+const APP_VERSION = "1.44.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1631,6 +1631,20 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Wijst een debiteur/crediteur toe aan een bestaande Betaling — nodig
+  // omdat het "+ Nieuwe betaling"-formulier dit al kon instellen bij
+  // aanmaak, maar er voorheen geen manier was om dit nadien nog aan te
+  // passen (bv. vanuit het detailscherm).
+  async function updatePaymentCounterparty(paymentId, counterpartyId) {
+    try {
+      await atUpdate(TABLES.payments, [{ id: paymentId, fields: { DebiteurCrediteur: counterpartyId ? [counterpartyId] : [] } }]);
+      setPayments((prev) => prev.map((p) => (p.id === paymentId ? { ...p, counterpartyId } : p)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // ---- mutations ----
   function resetForm() {
     setForm(emptyForm);
@@ -2534,11 +2548,13 @@ export default function CashflowPlanner() {
       {/* Detailscherm (post of betaling) */}
       {detailTarget && (
         <DetailModal
+          key={`${detailTarget.type}-${detailTarget.id}`}
           target={detailTarget}
           items={items}
           payments={payments}
           entityById={entityById}
           counterpartyById={counterpartyById}
+          counterparties={counterparties}
           categories={categories}
           projects={projects}
           onClose={() => setDetailTarget(null)}
@@ -2547,6 +2563,8 @@ export default function CashflowPlanner() {
           onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
           onUnlinkPayment={unlinkPaymentFromDocument}
           onDeletePayment={async (payment) => { await deletePayment(payment); setDetailTarget(null); }}
+          onResolveCounterparty={resolveCounterpartyId}
+          onUpdatePaymentCounterparty={updatePaymentCounterparty}
         />
       )}
 
@@ -4688,7 +4706,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -4706,6 +4724,19 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, ca
   const entity = entityById[record.entityId];
   const category = record.categoryId ? (categories || []).find((c) => c.id === record.categoryId) : null;
   const project = record.projectId ? (projects || []).find((p) => p.id === record.projectId) : null;
+  const [counterpartyInput, setCounterpartyInput] = useState("");
+  const [savingCounterparty, setSavingCounterparty] = useState(false);
+  const currentCounterparty = record.counterpartyId ? counterpartyById[record.counterpartyId] : null;
+
+  async function saveCounterparty() {
+    const name = counterpartyInput.trim();
+    if (!name || !onResolveCounterparty || !onUpdatePaymentCounterparty) return;
+    setSavingCounterparty(true);
+    const id = await onResolveCounterparty(name);
+    await onUpdatePaymentCounterparty(record.id, id);
+    setSavingCounterparty(false);
+    setCounterpartyInput("");
+  }
 
   let snapshot = null;
   if (type === "item" && record.bankSnapshot) {
@@ -4736,7 +4767,47 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, ca
         <div>
           <Row label="Omschrijving" value={record.description} />
           <Row label="Boekhouding" value={entity?.name} />
-          <Row label="Debiteur/crediteur" value={record.counterpartyId ? counterpartyById[record.counterpartyId]?.name : null} />
+          {type === "item" ? (
+            <Row label="Debiteur/crediteur" value={currentCounterparty?.name} />
+          ) : (
+            <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-50">
+              <span className="text-[11px] text-slate-400 shrink-0 pt-1.5">Debiteur/crediteur</span>
+              <div className="flex-1 min-w-0">
+                {currentCounterparty ? (
+                  <div className="flex items-center justify-end gap-2">
+                    <span className="text-xs text-slate-700">{currentCounterparty.name}</span>
+                    <button
+                      onClick={() => { setCounterpartyInput(currentCounterparty.name); onUpdatePaymentCounterparty(record.id, null); }}
+                      className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
+                    >
+                      wijzig
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={counterpartyInput}
+                      onChange={(e) => setCounterpartyInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && saveCounterparty()}
+                      placeholder="Naam invullen…"
+                      list="detail-counterparty-suggestions"
+                      className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400 text-right"
+                    />
+                    <datalist id="detail-counterparty-suggestions">
+                      {(counterparties || []).map((c) => <option key={c.id} value={c.name} />)}
+                    </datalist>
+                    <button
+                      onClick={saveCounterparty}
+                      disabled={!counterpartyInput.trim() || savingCounterparty}
+                      className="text-[10px] bg-slate-900 text-white rounded px-2 py-1 shrink-0 disabled:opacity-40"
+                    >
+                      {savingCounterparty ? "…" : "Koppel"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <Row label="Bedrag" value={`${record.direction === "in" ? "+" : "−"}${eur(record.amount)}`} />
           <Row label="Richting" value={record.direction === "in" ? "Inkomst" : "Uitgave"} />
           {type === "item" ? (
