@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.41.0";
+const APP_VERSION = "1.42.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -817,6 +817,30 @@ export default function CashflowPlanner() {
           }
         }
 
+        // Crediteur/debiteur vooraf bepalen, zodat de Betaling meteen bij
+        // aanmaak al gekoppeld is — niet pas achteraf, en niet enkel voor
+        // het document zoals voorheen. Bij een match op een bestaand
+        // document nemen we diens crediteur over (geen nieuwe aanmaken);
+        // anders wordt de banknaam zoals gebruikelijk herkend/aangemaakt.
+        let counterpartyId = null;
+        let trustedCounterparty = false;
+        if (matchedItem?.counterpartyId) {
+          counterpartyId = matchedItem.counterpartyId;
+        } else if (entry.counterpartyName) {
+          const existing = workingCounterparties.find(
+            (c) => c.name.toLowerCase() === entry.counterpartyName.toLowerCase()
+          );
+          if (existing) {
+            counterpartyId = existing.id;
+            trustedCounterparty = existing.autoCreateDoc;
+          } else {
+            // Gloednieuwe crediteur/debiteur — kan per definitie nog niet
+            // vertrouwd zijn (AutomatischDocumentAanmaken staat nooit aan
+            // bij aanmaak).
+            counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
+          }
+        }
+
         const snapshot = { ...entry, wasCreated: !matchedItem };
         const paymentFields = paymentToFields({
           description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
@@ -829,6 +853,7 @@ export default function CashflowPlanner() {
           raw: snapshot,
           categoryId: null,
           projectId: null,
+          counterpartyId,
           documentIds: matchedItem ? [matchedItem.id] : [],
           noDocumentNeeded: false,
         });
@@ -850,23 +875,6 @@ export default function CashflowPlanner() {
           );
           matched++;
         } else {
-          let counterpartyId = null;
-          let trustedCounterparty = false;
-          if (entry.counterpartyName) {
-            const existing = workingCounterparties.find(
-              (c) => c.name.toLowerCase() === entry.counterpartyName.toLowerCase()
-            );
-            if (existing) {
-              counterpartyId = existing.id;
-              trustedCounterparty = existing.autoCreateDoc;
-            } else {
-              // Gloednieuwe crediteur/debiteur — kan per definitie nog niet
-              // vertrouwd zijn (AutomatischDocumentAanmaken staat nooit aan
-              // bij aanmaak).
-              counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
-            }
-          }
-
           if (trustedCounterparty) {
             // Vertrouwde crediteur/debiteur: meteen automatisch een document
             // aanmaken en koppelen, geen bevestiging nodig.
@@ -1202,6 +1210,7 @@ export default function CashflowPlanner() {
           raw: snap || { amount: doc.amount, direction: doc.direction, bookingDate: doc.dueDate, counterpartyName: doc.description, remittance: doc.note || "", wasCreated: null },
           categoryId: null,
           projectId: null,
+          counterpartyId: doc.counterpartyId || null,
           documentIds: [doc.id],
           noDocumentNeeded: false,
         };
