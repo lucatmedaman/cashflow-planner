@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.52.0";
+const APP_VERSION = "1.53.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -4231,6 +4231,43 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
           </button>
         </div>
       </div>
+
+      {showUnused && (
+        <div className="bg-white border border-amber-200 rounded-xl p-3.5 space-y-2">
+          {unusedCounterparties.length === 0 ? (
+            <p className="text-xs text-slate-400">Geen ongebruikte crediteuren gevonden.</p>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-400">
+                Nergens aan een post of betaling gekoppeld — vaak losse rommel (enkele letters/cijfers, rauwe banktekst) die geen exacte naam-duplicaat is en dus niet bij "Dubbels" staat. Veilig om in bulk te verwijderen.
+              </p>
+              <div className="max-h-40 overflow-y-auto -mx-3.5 px-3.5 flex flex-wrap gap-1.5">
+                {unusedCounterparties.slice(0, 200).map((c) => (
+                  <span key={c.id} className="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 truncate max-w-[220px]">
+                    {c.name || "(leeg)"}
+                  </span>
+                ))}
+                {unusedCounterparties.length > 200 && (
+                  <span className="text-[11px] text-slate-400">en {unusedCounterparties.length - 200} meer…</span>
+                )}
+              </div>
+              <button
+                onClick={async () => {
+                  if (deletingUnused) return;
+                  setDeletingUnused(true);
+                  await onDeleteUnusedCounterparties(unusedCounterparties.map((c) => c.id));
+                  setDeletingUnused(false);
+                  setShowUnused(false);
+                }}
+                disabled={deletingUnused}
+                className="w-full bg-rose-600 text-white rounded-lg py-2 text-xs font-medium disabled:opacity-40"
+              >
+                {deletingUnused ? "Bezig…" : `Verwijder alle ${unusedCounterparties.length} ongebruikte crediteuren`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {showDuplicates && (
         <div className="bg-white border border-rose-200 rounded-xl p-3.5 space-y-2">
