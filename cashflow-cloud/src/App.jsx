@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.37.0";
+const APP_VERSION = "1.38.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -26,12 +26,12 @@ const RECURRENCE_OPTIONS = [
 ];
 
 const ENTITY_COLORS = [
-  { bg: "#EEF2FF", ring: "#6366F1", text: "#4338CA", dot: "#6366F1" }, // indigo
-  { bg: "#ECFDF5", ring: "#10B981", text: "#047857", dot: "#10B981" }, // emerald
-  { bg: "#FFF7ED", ring: "#F59E0B", text: "#B45309", dot: "#F59E0B" }, // amber
-  { bg: "#FDF2F8", ring: "#EC4899", text: "#BE185D", dot: "#EC4899" }, // pink
-  { bg: "#F0F9FF", ring: "#0EA5E9", text: "#0369A1", dot: "#0EA5E9" }, // sky
-  { bg: "#F5F3FF", ring: "#8B5CF6", text: "#6D28D9", dot: "#8B5CF6" }, // violet
+  { bg: "#EEF3F1", ring: "#3B6E5C", text: "#2A4F41", dot: "#3B6E5C" }, // pine
+  { bg: "#FBEFE9", ring: "#B3462C", text: "#8A3520", dot: "#B3462C" }, // clay
+  { bg: "#FBF1DF", ring: "#B4791F", text: "#8A5A15", dot: "#B4791F" }, // ochre
+  { bg: "#EEEEF6", ring: "#4C4E8A", text: "#35376B", dot: "#4C4E8A" }, // indigo-ink
+  { bg: "#EAF1F4", ring: "#2A6E82", text: "#1E4F5E", dot: "#2A6E82" }, // teal-slate
+  { bg: "#F3EEF6", ring: "#6E4C8A", text: "#523670", dot: "#6E4C8A" }, // plum
 ];
 
 const DEFAULT_ENTITIES = [
@@ -1817,73 +1817,82 @@ export default function CashflowPlanner() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 gap-2">
+      <div className="min-h-screen flex items-center justify-center bg-[#F4F6F5] text-[#93999F] gap-2">
         <Loader2 className="w-4 h-4 animate-spin" /> Verbinden met Airtable…
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+    <div className="min-h-screen bg-[#F4F6F5] text-[#12181F] font-sans">
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link
+        href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet"
+      />
+      <style>{`
+        .font-display { font-family: 'Spectral', Georgia, serif; }
+        .font-num { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+      `}</style>
       <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 lg:px-8 pb-28">
         {/* Header */}
-        <header className="pt-6 pb-4 sticky top-0 bg-slate-50/95 backdrop-blur z-20">
+        <header className="pt-6 pb-4 sticky top-0 bg-[#F4F6F5]/95 backdrop-blur z-20">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-slate-900 flex items-center gap-2">
+              <h1 className="font-display text-[22px] font-medium tracking-tight text-[#12181F] flex items-center gap-2">
                 Cashflow
-                <span className="text-[11px] font-mono font-medium text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">
+                <span className="font-num text-[10.5px] font-medium text-[#93999F] bg-white border border-[#E3E7E4] rounded px-1.5 py-0.5">
                   v{APP_VERSION}
                 </span>
               </h1>
-              <p className="text-xs text-slate-500 mt-0.5">Te betalen &amp; te ontvangen, per boekhouding</p>
+              <p className="text-[12.5px] text-[#5B6570] mt-0.5">Te betalen &amp; te ontvangen, per boekhouding</p>
             </div>
-            <div className="flex bg-white border border-slate-200 rounded-full p-0.5 text-sm overflow-x-auto max-w-full">
+            <div className="flex bg-white border border-[#E3E7E4] rounded-full p-0.5 text-sm overflow-x-auto max-w-full">
               <button
                 onClick={() => setView("planning")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "planning" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "planning" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Planning
               </button>
               <button
                 onClick={() => setView("rapport")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "rapport" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "rapport" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Rapport
               </button>
               <button
                 onClick={() => setView("grafiek")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "grafiek" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "grafiek" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Grafiek
               </button>
               <button
                 onClick={() => setView("crediteuren")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "crediteuren" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "crediteuren" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Crediteuren
               </button>
               <button
                 onClick={() => setView("afpunten")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "afpunten" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "afpunten" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Afpunten{unreadCount > 0 ? ` (${unreadCount})` : ""}
               </button>
               <button
                 onClick={() => setView("koppelen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "koppelen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "koppelen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Koppelen
               </button>
               <button
                 onClick={() => setView("betalingen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "betalingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "betalingen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Betalingen
               </button>
               <button
                 onClick={() => setView("boekhoudingen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
               >
                 Boekhoudingen
               </button>
@@ -1893,7 +1902,7 @@ export default function CashflowPlanner() {
           <div className="mt-3">
             <button
               onClick={openNewItemForm}
-              className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium"
+              className="w-full flex items-center justify-center gap-2 bg-[#12181F] text-[#F4F6F5] rounded-lg py-2.5 text-sm font-medium"
             >
               <Plus className="w-4 h-4" /> Nieuwe post (factuur / inkomst)
             </button>
@@ -1903,7 +1912,7 @@ export default function CashflowPlanner() {
             {offlineMode ? (
               <span className="text-amber-600">Offline — laatste lokale kopie getoond, niet gesynchroniseerd met Airtable</span>
             ) : lastSyncedAt ? (
-              <span className={syncToast ? "text-emerald-600 font-medium" : ""}>
+              <span className={syncToast ? "text-[#1E8E5A] font-medium" : ""}>
                 {syncToast ? "● Gesynchroniseerd met Airtable" : `Laatst gesynchroniseerd: ${new Date(lastSyncedAt).toLocaleTimeString("nl-BE")}`}
               </span>
             ) : null}
@@ -1964,8 +1973,8 @@ export default function CashflowPlanner() {
               onClick={() => setActiveEntity("all")}
               className={`shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
                 activeEntity === "all"
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200"
+                  ? "bg-[#12181F] text-[#F4F6F5] border-[#12181F]"
+                  : "bg-white text-[#5B6570] border-[#E3E7E4]"
               }`}
             >
               Alle
@@ -1981,7 +1990,7 @@ export default function CashflowPlanner() {
                   style={
                     active
                       ? { background: c.dot, borderColor: c.dot, color: "white" }
-                      : { background: "white", borderColor: "#E2E8F0", color: "#475569" }
+                      : { background: "white", borderColor: "#E3E7E4", color: "#5B6570" }
                   }
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: active ? "white" : c.dot }} />
@@ -1991,7 +2000,7 @@ export default function CashflowPlanner() {
             })}
             <button
               onClick={() => setView("boekhoudingen")}
-              className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-dashed border-slate-300 text-slate-400 flex items-center gap-1"
+              className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-dashed border-[#C7CCC9] text-[#93999F] flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" /> Boekhouding
             </button>
@@ -2110,16 +2119,16 @@ export default function CashflowPlanner() {
                 return (
                 <div key={date}>
                   <div className="flex items-baseline justify-between mb-1.5">
-                    <p className={`text-xs font-medium ${date < todayISO() ? "text-rose-600" : "text-slate-500"}`}>
+                    <p className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
                       {formatDateLabel(date)}
                     </p>
-                    <p className="text-xs font-medium shrink-0">
+                    <p className="font-num text-xs font-medium shrink-0">
                       {dateIn > 0 && dateUit > 0 && (
-                        <span className="text-slate-400 font-normal mr-1.5">
+                        <span className="text-[#93999F] font-normal mr-1.5">
                           +{eur(dateIn)} / −{eur(dateUit)}
                         </span>
                       )}
-                      <span className={dateNet >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                      <span className={dateNet >= 0 ? "text-[#1E8E5A]" : "text-[#B3462C]"}>
                         {dateNet >= 0 ? "+" : ""}{eur(dateNet)}
                       </span>
                     </p>
@@ -2450,11 +2459,11 @@ export default function CashflowPlanner() {
 // ---------- subcomponents ----------
 
 function SummaryCard({ label, value, tone, isCount }) {
-  const color = tone === "pos" ? "#047857" : "#BE123C";
+  const color = tone === "pos" ? "#1E8E5A" : "#B3462C";
   return (
-    <div className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-      <p className="text-[11px] text-slate-400">{label}</p>
-      <p className="text-sm font-semibold mt-0.5" style={{ color: isCount ? "#334155" : color }}>
+    <div className="bg-white border border-[#E3E7E4] rounded-xl px-3 py-2.5">
+      <p className="text-[10.5px] uppercase tracking-wide text-[#93999F]">{label}</p>
+      <p className="font-num text-[17px] font-medium mt-0.5" style={{ color: isCount ? "#12181F" : color }}>
         {isCount ? value : eur(value)}
       </p>
     </div>
@@ -2474,11 +2483,13 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
 
   return (
     <>
-    <div className={`flex items-center gap-2.5 bg-white border rounded-lg px-3 py-2.5 ${overdue ? "border-rose-200" : "border-slate-200"}`}>
+    <div className={`flex items-stretch bg-white border rounded-lg overflow-hidden ${overdue ? "border-[#E9C7B9]" : "border-[#E3E7E4]"}`}>
+      <div className="w-[3px] shrink-0" style={{ background: c.dot }} />
+      <div className="flex items-center gap-2.5 px-3 py-2.5 flex-1 min-w-0">
       <button
         onClick={() => onTogglePaid(row.itemId, row.date)}
         className={`shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition ${
-          row.paid ? "bg-emerald-500 border-emerald-500" : "border-slate-300"
+          row.paid ? "bg-[#1E8E5A] border-[#1E8E5A]" : "border-[#C7CCC9]"
         }`}
         title={row.paid ? "Markeer als niet betaald" : "Markeer als betaald"}
       >
@@ -2487,42 +2498,41 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: c.dot }} />
-          <span className="text-xs text-slate-400 truncate">{entity?.name || "?"}</span>
-          {showDate && <span className="text-xs text-rose-500 font-medium shrink-0">{formatDateLabel(row.displayDate)}</span>}
-          {row.item.recurrence !== "once" && <RotateCcw className="w-3 h-3 text-slate-300 shrink-0" />}
+          <span className="text-xs text-[#5B6570] truncate">{entity?.name || "?"}</span>
+          {showDate && <span className="text-xs text-[#B3462C] font-medium shrink-0">{formatDateLabel(row.displayDate)}</span>}
+          {row.item.recurrence !== "once" && <RotateCcw className="w-3 h-3 text-[#C7CCC9] shrink-0" />}
           {row.item.viaPaypal && (
-            <span className="text-[10px] font-medium text-[#003087] bg-[#e6ecff] rounded px-1 py-0.5 shrink-0">PayPal</span>
+            <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#003087] bg-[#e6ecff] rounded px-1.5 py-0.5 shrink-0">PayPal</span>
           )}
           {row.item.source === "Bank-import" && (
-            <span className="text-[10px] font-medium text-teal-600 bg-teal-50 rounded px-1 py-0.5 shrink-0">Bank</span>
+            <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#0B6E5C] bg-[#E4F0EC] rounded px-1.5 py-0.5 shrink-0">Bank</span>
           )}
           {row.item.source === "Billtobox" && (
-            <span className="text-[10px] font-medium text-indigo-600 bg-indigo-50 rounded px-1 py-0.5 shrink-0">Billtobox</span>
+            <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#4C4E8A] bg-[#EEEEF6] rounded px-1.5 py-0.5 shrink-0">Billtobox</span>
           )}
         </div>
-        <p className={`text-sm truncate ${row.paid ? "line-through text-slate-400" : "text-slate-800"}`}>
+        <p className={`text-sm truncate ${row.paid ? "line-through text-[#93999F]" : "text-[#12181F]"}`}>
           {row.item.description}
           {counterparty && (
             <>
               {" — "}
               <button
                 onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
-                className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                className="text-[#5B6570] font-normal underline decoration-dotted hover:text-[#12181F]"
               >
                 {counterparty.name}
               </button>
             </>
           )}
         </p>
-        <p className="text-[11px] text-slate-400 truncate">
+        <p className="text-[11px] text-[#93999F] truncate">
           Verval: {row.date}
           {row.item.payDate && row.item.payDate !== row.item.dueDate && <> · Betaal: {row.item.payDate}</>}
           {row.item.invoiceDate && <> · Fact.: {row.item.invoiceDate}</>}
         </p>
         {(row.item.accountNumber || row.item.note) && (
-          <p className="text-[11px] text-slate-400 truncate">
-            {row.item.accountNumber && <span className="font-mono">{row.item.accountNumber}</span>}
+          <p className="text-[11px] text-[#93999F] truncate">
+            {row.item.accountNumber && <span className="font-num">{row.item.accountNumber}</span>}
             {row.item.accountNumber && row.item.note && " · "}
             {row.item.note}
           </p>
@@ -2533,10 +2543,10 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
               const linkedPayment = (payments || []).find((p) => p.id === pid);
               return (
                 <div key={pid} className="flex items-center gap-1.5 text-[11px]">
-                  <Link2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                  <Link2 className="w-3 h-3 text-[#1E8E5A] shrink-0" />
                   <button
                     onClick={(e) => { e.stopPropagation(); onOpenDetail?.("payment", pid); }}
-                    className="text-emerald-700 truncate underline decoration-dotted text-left"
+                    className="text-[#1E8E5A] truncate underline decoration-dotted text-left"
                   >
                     {linkedPayment
                       ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
@@ -2545,7 +2555,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
                   {linkedPayment && onUnlinkPayment && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onUnlinkPayment(linkedPayment, row.itemId); }}
-                      className="text-rose-400 underline decoration-dotted shrink-0"
+                      className="text-[#B3462C] underline decoration-dotted shrink-0"
                     >
                       ontkoppel
                     </button>
@@ -2558,47 +2568,48 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
       </div>
 
       <div className="text-right shrink-0">
-        <p className={`text-sm font-medium ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
+        <p className={`font-num text-[15px] font-medium ${isIn ? "text-[#1E8E5A]" : "text-[#B3462C]"}`}>
           {isIn ? "+" : "−"}{eur(row.item.amount)}
         </p>
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
         {onOpenDetail && (
-          <button onClick={() => onOpenDetail("item", row.itemId)} className="p-1 text-slate-300 hover:text-slate-600" title="Alle details bekijken">
+          <button onClick={() => onOpenDetail("item", row.itemId)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Alle details bekijken">
             <Eye className="w-3.5 h-3.5" />
           </button>
         )}
         {paymentIds.length === 0 && onLinkPayment && (
           <button
             onClick={() => { setLinkPickerOpen((s) => !s); setChosenPaymentId(""); }}
-            className="p-1 text-slate-300 hover:text-slate-600"
+            className="p-1 text-[#C7CCC9] hover:text-[#12181F]"
             title="Koppel aan een betaling"
           >
             <Link2 className="w-3.5 h-3.5" />
           </button>
         )}
-        <button onClick={() => onEdit(row.item)} className="p-1 text-slate-300 hover:text-slate-600">
+        <button onClick={() => onEdit(row.item)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]">
           <Edit2 className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDuplicate(row.item)} className="p-1 text-slate-300 hover:text-slate-600" title="Dupliceren">
+        <button onClick={() => onDuplicate(row.item)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Dupliceren">
           <Copy className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDelete(row.itemId)} className="p-1 text-slate-300 hover:text-rose-500">
+        <button onClick={() => onDelete(row.itemId)} className="p-1 text-[#C7CCC9] hover:text-[#B3462C]">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
+      </div>
     </div>
     {linkPickerOpen && (
-      <div className="bg-white border border-slate-200 rounded-lg px-3 py-2.5 -mt-1 space-y-2">
+      <div className="bg-white border border-[#E3E7E4] rounded-lg px-3 py-2.5 -mt-1 space-y-2">
         {linkCandidates.length === 0 ? (
-          <p className="text-[11px] text-slate-400">Geen ongekoppelde betalingen gevonden voor deze boekhouding.</p>
+          <p className="text-[11px] text-[#93999F]">Geen ongekoppelde betalingen gevonden voor deze boekhouding.</p>
         ) : (
           <>
             <select
               value={chosenPaymentId}
               onChange={(e) => setChosenPaymentId(e.target.value)}
-              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+              className="w-full border border-[#E3E7E4] rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#12181F]"
             >
               <option value="" disabled>Kies de juiste betaling…</option>
               {linkCandidates.map((p) => (
