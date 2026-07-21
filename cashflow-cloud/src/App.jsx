@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.53.0";
+const APP_VERSION = "1.53.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1704,6 +1704,25 @@ export default function CashflowPlanner() {
     return { merged: duplicates.length };
   }
 
+  const unusedCounterparties = useMemo(() => {
+    const usedIds = new Set();
+    items.forEach((i) => { if (i.counterpartyId) usedIds.add(i.counterpartyId); });
+    payments.forEach((p) => { if (p.counterpartyId) usedIds.add(p.counterpartyId); });
+    return counterparties.filter((c) => !usedIds.has(c.id));
+  }, [items, payments, counterparties]);
+
+  async function deleteUnusedCounterparties(ids) {
+    try {
+      for (let i = 0; i < ids.length; i += 10) {
+        await atDelete(TABLES.counterparties, ids.slice(i, i + 10));
+      }
+      setCounterparties((prev) => prev.filter((c) => !ids.includes(c.id)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // ---- mutations ----
   function resetForm() {
     setForm(emptyForm);
@@ -2418,6 +2437,8 @@ export default function CashflowPlanner() {
             onToggleTrust={toggleCounterpartyTrust}
             onMergeCounterparties={mergeCounterparties}
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
+            unusedCounterparties={unusedCounterparties}
+            onDeleteUnusedCounterparties={deleteUnusedCounterparties}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -4121,7 +4142,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onMergeCounterparties, onCleanupDuplicateGroup }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [mergingFor, setMergingFor] = useState(null);
@@ -4138,6 +4159,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [cleaningName, setCleaningName] = useState(null);
   const [cleanupResults, setCleanupResults] = useState({});
+  const [showUnused, setShowUnused] = useState(false);
+  const [deletingUnused, setDeletingUnused] = useState(false);
   const [newPattern, setNewPattern] = useState("");
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
@@ -4201,6 +4224,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-slate-400">Alle posten per debiteur/crediteur, ongeacht betaalstatus</p>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => setShowUnused((s) => !s)}
+            className={`text-xs px-2.5 py-1.5 rounded-full border ${
+              unusedCounterparties.length > 0 ? "border-amber-200 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-600"
+            }`}
+          >
+            Ongebruikt{unusedCounterparties.length > 0 ? ` (${unusedCounterparties.length})` : ""}
+          </button>
           <button
             onClick={() => setShowDuplicates((s) => !s)}
             className={`text-xs px-2.5 py-1.5 rounded-full border ${
