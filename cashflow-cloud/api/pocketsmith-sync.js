@@ -285,6 +285,27 @@ export default async function handler(req, res) {
         const target = candidates.length > 0 ? candidates[0] : null;
         snapshot.wasCreated = !target;
 
+        // Crediteur/debiteur vooraf bepalen — zelfde volgorde als de
+        // handmatige CAMT.053-import: bij een match op een bestaand document
+        // wordt diens crediteur overgenomen (geen nieuwe aangemaakt), anders
+        // wordt de (opgeschoonde) banknaam herkend of aangemaakt. Dit
+        // gebeurt nu ongeacht of de crediteur "vertrouwd" is — vertrouwen
+        // bepaalt enkel of er ook automatisch een document aangemaakt wordt.
+        let counterpartyId = null;
+        let trustedCounterparty = false;
+        const targetCounterpartyId = target ? (target.fields.DebiteurCrediteur || [])[0] : null;
+        if (targetCounterpartyId) {
+          counterpartyId = targetCounterpartyId;
+        } else if (payee) {
+          const existing = counterparties.find((c) => (c.fields.Naam || "").toLowerCase() === payee.toLowerCase());
+          if (existing) {
+            counterpartyId = existing.id;
+            trustedCounterparty = !!existing.fields.AutomatischDocumentAanmaken;
+          } else {
+            counterpartyId = await resolveCounterpartyId(payee, counterparties);
+          }
+        }
+
         const paymentFields = {
           Omschrijving: payee.slice(0, 80),
           Datum: date,
@@ -294,6 +315,7 @@ export default async function handler(req, res) {
           Bron: "PocketSmith",
           Bankreferentie: ref,
           RuweBrongegevens: JSON.stringify(snapshot),
+          DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
           GekoppeldeDocumenten: target ? [target.id] : [],
           GeenDocumentNodig: false,
         };
@@ -311,11 +333,7 @@ export default async function handler(req, res) {
           });
           matched++;
         } else {
-          const existing = counterparties.find((c) => (c.fields.Naam || "").toLowerCase() === payee.toLowerCase());
-          const trusted = existing ? !!existing.fields.AutomatischDocumentAanmaken : false;
-
-          if (trusted) {
-            const counterpartyId = await resolveCounterpartyId(payee, counterparties);
+          if (trustedCounterparty) {
             const docRec = await atCreate(TABLES.items, {
               Omschrijving: payee.slice(0, 80),
               Boekhouding: [entity.id],
@@ -337,6 +355,7 @@ export default async function handler(req, res) {
           } else {
             // Geen match, geen vertrouwde crediteur: betaling blijft
             // ongekoppeld — te bevestigen/koppelen in het Koppelen-scherm.
+            // (De crediteur zelf staat intussen wél al op de betaling.)
             proposed++;
           }
         }
