@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.42.0";
+const APP_VERSION = "1.43.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1601,6 +1601,36 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Bewerkformulier voor een debiteur/crediteur zelf (naam, BTW-nummer,
+  // rekeningnummer, adres): lokale state per toetsaanslag voor directe
+  // feedback, wegschrijven pas on-blur — zelfde patroon als de
+  // boekhouding-velden in BoekhoudingenView.
+  const COUNTERPARTY_FIELD_MAP = { name: "Naam", vatNumber: "BTWNummer", accountNumber: "Rekeningnummer", address: "Adres" };
+  function updateCounterpartyFieldLocal(id, key, value) {
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, [key]: value } : c)));
+  }
+  async function commitCounterpartyField(id, key) {
+    const cp = counterparties.find((c) => c.id === id);
+    if (!cp) return;
+    const airtableField = COUNTERPARTY_FIELD_MAP[key];
+    if (!airtableField) return;
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { [airtableField]: cp[key] || "" } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+  async function toggleCounterpartyTrust(id, next) {
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, autoCreateDoc: next } : c)));
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { AutomatischDocumentAanmaken: next } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // ---- mutations ----
   function resetForm() {
     setForm(emptyForm);
@@ -2309,6 +2339,9 @@ export default function CashflowPlanner() {
             onUnlinkPayment={unlinkPaymentFromDocument}
             onOpenDetail={openDetail}
             onUpdatePriority={updateCounterpartyPriority}
+            onUpdateFieldLocal={updateCounterpartyFieldLocal}
+            onCommitField={commitCounterpartyField}
+            onToggleTrust={toggleCounterpartyTrust}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -3944,8 +3977,9 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
+  const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
   const [linkingItemId, setLinkingItemId] = useState(null);
@@ -4144,29 +4178,89 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             </button>
             {open && (
               <div className="border-t border-slate-100">
-                <div className="px-3.5 py-2.5 flex items-center gap-2 bg-slate-50/60 border-b border-slate-100">
-                  <span className="text-[11px] text-slate-400 shrink-0">Standaardprioriteit voor deze debiteur/crediteur:</span>
-                  <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 text-[11px]">
-                    <button
-                      type="button"
-                      onClick={() => onUpdatePriority(counterparty.id, "")}
-                      className={`px-2 py-1 rounded-md ${!counterparty.priority ? "bg-slate-100 text-slate-600 font-medium" : "text-slate-400"}`}
-                    >
-                      Geen
-                    </button>
-                    {PRIORITY_LEVELS.map((p) => (
+                <div className="px-3.5 py-2.5 flex items-center justify-between gap-2 bg-slate-50/60 border-b border-slate-100">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-slate-400 shrink-0">Standaardprioriteit voor deze debiteur/crediteur:</span>
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 text-[11px]">
                       <button
-                        key={p.value}
                         type="button"
-                        onClick={() => onUpdatePriority(counterparty.id, p.value)}
-                        className="px-2 py-1 rounded-md font-medium"
-                        style={counterparty.priority === p.value ? { background: `${p.color}1A`, color: p.color } : { color: "#94A3B8" }}
+                        onClick={() => onUpdatePriority(counterparty.id, "")}
+                        className={`px-2 py-1 rounded-md ${!counterparty.priority ? "bg-slate-100 text-slate-600 font-medium" : "text-slate-400"}`}
                       >
-                        {p.label}
+                        Geen
                       </button>
-                    ))}
+                      {PRIORITY_LEVELS.map((p) => (
+                        <button
+                          key={p.value}
+                          type="button"
+                          onClick={() => onUpdatePriority(counterparty.id, p.value)}
+                          className="px-2 py-1 rounded-md font-medium"
+                          style={counterparty.priority === p.value ? { background: `${p.color}1A`, color: p.color } : { color: "#94A3B8" }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditDetailsFor(editDetailsFor === counterparty.id ? null : counterparty.id)}
+                    className="text-[11px] text-slate-500 underline decoration-dotted shrink-0"
+                  >
+                    {editDetailsFor === counterparty.id ? "Sluiten" : "Gegevens bewerken"}
+                  </button>
                 </div>
+                {editDetailsFor === counterparty.id && (
+                  <div className="px-3.5 py-3 space-y-2 bg-slate-50/60 border-b border-slate-100">
+                    <div>
+                      <label className="text-[11px] text-slate-400">Naam</label>
+                      <input
+                        value={counterparty.name}
+                        onChange={(e) => onUpdateFieldLocal(counterparty.id, "name", e.target.value)}
+                        onBlur={() => onCommitField(counterparty.id, "name")}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-slate-400">BTW-nummer</label>
+                        <input
+                          value={counterparty.vatNumber || ""}
+                          onChange={(e) => onUpdateFieldLocal(counterparty.id, "vatNumber", e.target.value)}
+                          onBlur={() => onCommitField(counterparty.id, "vatNumber")}
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400">Rekeningnummer</label>
+                        <input
+                          value={counterparty.accountNumber || ""}
+                          onChange={(e) => onUpdateFieldLocal(counterparty.id, "accountNumber", e.target.value)}
+                          onBlur={() => onCommitField(counterparty.id, "accountNumber")}
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:border-slate-400 bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Adres</label>
+                      <input
+                        value={counterparty.address || ""}
+                        onChange={(e) => onUpdateFieldLocal(counterparty.id, "address", e.target.value)}
+                        onBlur={() => onCommitField(counterparty.id, "address")}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
+                      <input
+                        type="checkbox"
+                        checked={!!counterparty.autoCreateDoc}
+                        onChange={(e) => onToggleTrust(counterparty.id, e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300"
+                      />
+                      Automatisch document aanmaken bij bank-import (vertrouwde crediteur)
+                    </label>
+                  </div>
+                )}
                 <div className="divide-y divide-slate-50">
                 {cpItems
                   .slice()
