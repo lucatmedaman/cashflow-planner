@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.51.0";
+const APP_VERSION = "1.52.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1685,6 +1685,25 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Ruimt in één klik alle debiteuren/crediteuren met exact dezelfde naam op:
+  // kiest als canonieke record bij voorkeur eentje dat al gebruikt wordt
+  // (heeft posten/betalingen), anders de eerste, en voegt de rest daarin
+  // samen (verhuist koppelingen, verwijdert de duplicaten) — het "opruim
+  // rommel"-paneel in Crediteuren roept dit per naam aan.
+  async function cleanupDuplicateGroup(name) {
+    const group = counterparties.filter((c) => c.name === name);
+    if (group.length <= 1) return { merged: 0 };
+    const withRefs = group.filter(
+      (c) => items.some((i) => i.counterpartyId === c.id) || payments.some((p) => p.counterpartyId === c.id)
+    );
+    const canonical = withRefs[0] || group[0];
+    const duplicates = group.filter((c) => c.id !== canonical.id);
+    for (const dup of duplicates) {
+      await mergeCounterparties(dup.id, canonical.id);
+    }
+    return { merged: duplicates.length };
+  }
+
   // ---- mutations ----
   function resetForm() {
     setForm(emptyForm);
@@ -2398,6 +2417,7 @@ export default function CashflowPlanner() {
             onCommitField={commitCounterpartyField}
             onToggleTrust={toggleCounterpartyTrust}
             onMergeCounterparties={mergeCounterparties}
+            onCleanupDuplicateGroup={cleanupDuplicateGroup}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -4101,7 +4121,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onMergeCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onMergeCounterparties, onCleanupDuplicateGroup }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [mergingFor, setMergingFor] = useState(null);
@@ -4115,6 +4135,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState(null);
   const [showMappings, setShowMappings] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [cleaningName, setCleaningName] = useState(null);
+  const [cleanupResults, setCleanupResults] = useState({});
   const [newPattern, setNewPattern] = useState("");
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
@@ -4157,11 +4180,35 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
     return { list, zonder };
   }, [scoped, counterparties, payments, filteredEntityIds]);
 
+  // "Rommel"-overzicht: crediteuren met exact dezelfde naam, ongeacht of ze
+  // posten/betalingen hebben (dus ook de volledig wees geraakte duplicaten
+  // die nergens anders in dit scherm zichtbaar zijn). Los van de
+  // boekhouding-filter — dubbels zijn boekhouding-onafhankelijk.
+  const duplicateGroups = useMemo(() => {
+    const byName = {};
+    counterparties.forEach((c) => {
+      if (!byName[c.name]) byName[c.name] = [];
+      byName[c.name].push(c);
+    });
+    return Object.entries(byName)
+      .filter(([, recs]) => recs.length > 1)
+      .map(([name, recs]) => ({ name, count: recs.length }))
+      .sort((a, b) => b.count - a.count);
+  }, [counterparties]);
+
   const mappingBar = (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-slate-400">Alle posten per debiteur/crediteur, ongeacht betaalstatus</p>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => setShowDuplicates((s) => !s)}
+            className={`text-xs px-2.5 py-1.5 rounded-full border ${
+              duplicateGroups.length > 0 ? "border-rose-200 bg-rose-50 text-rose-600" : "border-slate-200 bg-white text-slate-600"
+            }`}
+          >
+            Dubbels{duplicateGroups.length > 0 ? ` (${duplicateGroups.length})` : ""}
+          </button>
           <button
             onClick={() => setShowMappings((s) => !s)}
             className="text-xs px-2.5 py-1.5 rounded-full border border-slate-200 bg-white text-slate-600"
@@ -4184,6 +4231,46 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
           </button>
         </div>
       </div>
+
+      {showDuplicates && (
+        <div className="bg-white border border-rose-200 rounded-xl p-3.5 space-y-2">
+          {duplicateGroups.length === 0 ? (
+            <p className="text-xs text-slate-400">Geen dubbele namen gevonden.</p>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-400">
+                Crediteuren met exact dezelfde naam — vaak wees geraakt door een oudere import-bug. "Opruimen" bewaart er één (bij voorkeur een die al gekoppeld is) en voegt de rest daarin samen.
+              </p>
+              <div className="divide-y divide-slate-50 -mx-3.5">
+                {duplicateGroups.map((g) => (
+                  <div key={g.name} className="flex items-center justify-between gap-2 px-3.5 py-2">
+                    <span className="text-xs text-slate-700 truncate">{g.name}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] text-slate-400">{g.count}x</span>
+                      {cleanupResults[g.name] ? (
+                        <span className="text-[11px] text-emerald-600">{cleanupResults[g.name]} verwijderd</span>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            setCleaningName(g.name);
+                            const result = await onCleanupDuplicateGroup(g.name);
+                            setCleanupResults((prev) => ({ ...prev, [g.name]: result?.merged ?? 0 }));
+                            setCleaningName(null);
+                          }}
+                          disabled={cleaningName === g.name}
+                          className="text-[11px] px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+                        >
+                          {cleaningName === g.name ? "Bezig…" : "Opruimen"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {showMappings && (
         <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2">
