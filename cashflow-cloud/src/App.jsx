@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.40.0";
+const APP_VERSION = "1.41.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -282,6 +282,7 @@ function paymentFromRecord(r) {
     raw,
     categoryId: r.fields.Categorie?.[0] || null,
     projectId: r.fields.Project?.[0] || null,
+    counterpartyId: r.fields.DebiteurCrediteur?.[0] || null,
     documentIds: r.fields.GekoppeldeDocumenten || [],
     noDocumentNeeded: !!r.fields.GeenDocumentNodig,
   };
@@ -298,6 +299,7 @@ function paymentToFields(payment) {
     RuweBrongegevens: payment.raw ? JSON.stringify(payment.raw) : "",
     Categorie: payment.categoryId ? [payment.categoryId] : [],
     Project: payment.projectId ? [payment.projectId] : [],
+    DebiteurCrediteur: payment.counterpartyId ? [payment.counterpartyId] : [],
     GekoppeldeDocumenten: payment.documentIds || [],
     GeenDocumentNodig: !!payment.noDocumentNeeded,
   };
@@ -1138,6 +1140,7 @@ export default function CashflowPlanner() {
         raw: null,
         categoryId: draft.categoryId || null,
         projectId: draft.projectId || null,
+        counterpartyId: draft.counterpartyId || null,
         documentIds: [],
         noDocumentNeeded: false,
       });
@@ -2314,6 +2317,7 @@ export default function CashflowPlanner() {
             entities={sortedEntities}
             entityById={entityById}
             counterpartyById={counterpartyById}
+            counterparties={counterparties}
             filteredEntityIds={filteredEntityIds}
             activeEntity={activeEntity}
             categories={categories}
@@ -3176,7 +3180,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 }
 
 function KoppelenView({
-  items, payments, entities, entityById, counterpartyById, filteredEntityIds, activeEntity, categories, projects,
+  items, payments, entities, entityById, counterpartyById, counterparties, filteredEntityIds, activeEntity, categories, projects,
   onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail,
 }) {
   // Koppelen kan vanuit beide kanten starten: klik eerst een betaling (dan
@@ -3191,7 +3195,7 @@ function KoppelenView({
   const emptyNewPayment = {
     description: "", date: todayISO(), amount: "", direction: "uit",
     entityId: activeEntity !== "all" ? activeEntity : "", source: "Cash-handmatig",
-    categoryId: "", projectId: "",
+    categoryId: "", projectId: "", counterparty: "",
   };
   const [newPayment, setNewPayment] = useState(emptyNewPayment);
   const [adding, setAdding] = useState(false);
@@ -3290,6 +3294,16 @@ function KoppelenView({
               placeholder="Omschrijving"
               className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
             />
+            <input
+              value={newPayment.counterparty}
+              onChange={(e) => setNewPayment({ ...newPayment, counterparty: e.target.value })}
+              placeholder="Debiteur / crediteur (optioneel)"
+              list="koppelen-counterparty-suggestions"
+              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            />
+            <datalist id="koppelen-counterparty-suggestions">
+              {(counterparties || []).map((c) => <option key={c.id} value={c.name} />)}
+            </datalist>
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="date"
@@ -3362,7 +3376,10 @@ function KoppelenView({
               onClick={async () => {
                 if (!newPayment.entityId || !newPayment.amount) return;
                 setAdding(true);
-                await onAddManualPayment(newPayment);
+                const counterpartyId = newPayment.counterparty.trim()
+                  ? await onResolveCounterparty(newPayment.counterparty.trim())
+                  : null;
+                await onAddManualPayment({ ...newPayment, counterpartyId });
                 setAdding(false);
                 setShowNewPayment(false);
                 setNewPayment({ ...emptyNewPayment, entityId: activeEntity !== "all" ? activeEntity : "" });
@@ -4616,9 +4633,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, ca
         <div>
           <Row label="Omschrijving" value={record.description} />
           <Row label="Boekhouding" value={entity?.name} />
-          {type === "item" && (
-            <Row label="Debiteur/crediteur" value={record.counterpartyId ? counterpartyById[record.counterpartyId]?.name : null} />
-          )}
+          <Row label="Debiteur/crediteur" value={record.counterpartyId ? counterpartyById[record.counterpartyId]?.name : null} />
           <Row label="Bedrag" value={`${record.direction === "in" ? "+" : "−"}${eur(record.amount)}`} />
           <Row label="Richting" value={record.direction === "in" ? "Inkomst" : "Uitgave"} />
           {type === "item" ? (
