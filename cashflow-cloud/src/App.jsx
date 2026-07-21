@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.48.0";
+const APP_VERSION = "1.49.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2340,6 +2340,7 @@ export default function CashflowPlanner() {
             counterpartyById={counterpartyById}
             paymentHistory={paymentHistory}
             entityById={entityById}
+            onCounterpartyClick={goToCounterparty}
           />
         ) : view === "grafiek" ? (
           <ChartView
@@ -2391,6 +2392,7 @@ export default function CashflowPlanner() {
             filteredEntityIds={filteredEntityIds}
             onRelink={relinkBankEntry}
             onMarkRead={markRead}
+            onCounterpartyClick={goToCounterparty}
           />
         ) : view === "koppelen" ? (
           <KoppelenView
@@ -2413,6 +2415,7 @@ export default function CashflowPlanner() {
             onDeletePayment={deletePayment}
             onBackfill={backfillHistoricBankPayments}
             onOpenDetail={openDetail}
+            onCounterpartyClick={goToCounterparty}
           />
         ) : view === "betalingen" ? (
           <BetalingenView
@@ -2593,6 +2596,7 @@ export default function CashflowPlanner() {
           onDeletePayment={async (payment) => { await deletePayment(payment); setDetailTarget(null); }}
           onResolveCounterparty={resolveCounterpartyId}
           onUpdatePaymentCounterparty={updatePaymentCounterparty}
+          onCounterpartyClick={goToCounterparty}
         />
       )}
 
@@ -2987,7 +2991,7 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
   );
 }
 
-function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBalances, counterpartyById, paymentHistory, entityById }) {
+function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBalances, counterpartyById, paymentHistory, entityById, onCounterpartyClick }) {
   const [openLedgers, setOpenLedgers] = useState({});
   const [showCombinedLedger, setShowCombinedLedger] = useState(false);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
@@ -3055,7 +3059,15 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                       <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-800 last:border-0" title={extraDates || undefined}>
                         <span className="text-slate-500 shrink-0 w-16">{row.date.slice(5)}</span>
                         <span className="flex-1 min-w-0 truncate text-slate-300 px-2">
-                          {row.item.description}{cp ? ` — ${cp.name}` : ""}
+                          {row.item.description}
+                          {cp && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                              className="text-slate-500 underline decoration-dotted hover:text-slate-300"
+                            >
+                              {" — "}{cp.name}
+                            </button>
+                          )}
                           {extraDates && <span className="text-slate-500"> ({extraDates})</span>}
                         </span>
                         <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
@@ -3136,7 +3148,15 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                           <div key={`${row.itemId}-${row.date}`} className="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0" title={extraDates || undefined}>
                             <span className="text-slate-400 shrink-0 w-16">{row.date.slice(5)}</span>
                             <span className="flex-1 min-w-0 truncate text-slate-600 px-2">
-                              {row.item.description}{cp ? ` — ${cp.name}` : ""}
+                              {row.item.description}
+                              {cp && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                                  className="text-slate-400 underline decoration-dotted hover:text-slate-600"
+                                >
+                                  {" — "}{cp.name}
+                                </button>
+                              )}
                               {extraDates && <span className="text-slate-400"> ({extraDates})</span>}
                             </span>
                             <span className={`shrink-0 w-20 text-right ${row.delta >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3175,7 +3195,14 @@ function ReportView({ reportTotals, grandTotal, showGrand, entities, runningBala
                     <span className="text-slate-400 shrink-0 w-20">{row.date}</span>
                     <span className="flex-1 min-w-0 truncate px-2">
                       <span className="text-slate-700">{row.item.description}</span>
-                      {cp && <span className="text-slate-400"> — {cp.name}</span>}
+                      {cp && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                          className="text-slate-400 underline decoration-dotted hover:text-slate-600"
+                        >
+                          {" — "}{cp.name}
+                        </button>
+                      )}
                       {entity && <span className="text-slate-400"> · {entity.name}</span>}
                     </span>
                     <span className={`shrink-0 font-medium ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3269,7 +3296,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, counterparties, filteredEntityIds, activeEntity, categories, projects,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail, onCounterpartyClick,
 }) {
   // Koppelen kan vanuit beide kanten starten: klik eerst een betaling (dan
   // markeer je daarna het passende document), of omgekeerd — klik eerst een
@@ -3486,6 +3513,7 @@ function KoppelenView({
           <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-50">
             {unlinkedPayments.map((p) => {
               const entity = entityById[p.entityId];
+              const cp = p.counterpartyId ? counterpartyById[p.counterpartyId] : null;
               const selected = selection?.type === "payment" && selection.id === p.id;
               const isCreatingDocRow = creatingDocForId === p.id;
               return (
@@ -3502,7 +3530,17 @@ function KoppelenView({
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer ${selected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                    <p className="text-sm text-slate-800 truncate">
+                      {p.description}
+                      {cp && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                          className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                        >
+                          {" — "}{cp.name}
+                        </button>
+                      )}
+                    </p>
                     <p className="text-[11px] text-slate-400">{entity?.name} · {p.date} · {p.source}</p>
                   </div>
                   <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3636,7 +3674,17 @@ function KoppelenView({
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50 ${docSelected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-slate-800 truncate">{doc.description}{cp ? ` — ${cp.name}` : ""}</p>
+                    <p className="text-sm text-slate-800 truncate">
+                      {doc.description}
+                      {cp && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                          className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                        >
+                          {" — "}{cp.name}
+                        </button>
+                      )}
+                    </p>
                     <p className="text-[11px] text-slate-400">{entity?.name} · Verval: {doc.dueDate}</p>
                   </div>
                   <span className={`text-sm font-medium shrink-0 ${doc.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3674,6 +3722,7 @@ function KoppelenView({
             ) : (
               linkedPayments.map((p) => {
                 const entity = entityById[p.entityId];
+                const cp = p.counterpartyId ? counterpartyById[p.counterpartyId] : null;
                 return (
                   <div key={p.id} className="px-3.5 py-2.5">
                     <div className="flex items-center gap-2.5">
@@ -3684,6 +3733,14 @@ function KoppelenView({
                         >
                           {p.description}
                         </button>
+                        {cp && (
+                          <button
+                            onClick={() => onCounterpartyClick?.(cp.id)}
+                            className="text-sm text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                          >
+                            {" — "}{cp.name}
+                          </button>
+                        )}
                         <p className="text-[11px] text-slate-400">{entity?.name} · {p.date}</p>
                       </div>
                       <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
@@ -3839,7 +3896,7 @@ function BoekhoudingenView({
   );
 }
 
-function ReconciliationView({ items, entityById, counterpartyById, filteredEntityIds, onRelink, onMarkRead }) {
+function ReconciliationView({ items, entityById, counterpartyById, filteredEntityIds, onRelink, onMarkRead, onCounterpartyClick }) {
   const [expandedId, setExpandedId] = useState(null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [targetId, setTargetId] = useState("");
@@ -3938,7 +3995,17 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
                     </span>
                     <span className="text-xs text-slate-400 shrink-0 w-16">{item.dueDate}</span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-slate-800 truncate">{item.description}{cp ? ` — ${cp.name}` : ""}</p>
+                      <p className="text-sm text-slate-800 truncate">
+                        {item.description}
+                        {cp && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                            className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                          >
+                            {" — "}{cp.name}
+                          </button>
+                        )}
+                      </p>
                       <p className="text-[11px] text-slate-400 truncate">
                         {entity?.name} · {item.source === "Billtobox" ? "Billtobox" : "Bank"}
                         {item.payDate && item.payDate !== item.dueDate && <> · Betaal: {item.payDate}</>}
@@ -4843,7 +4910,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -4905,14 +4972,31 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           <Row label="Omschrijving" value={record.description} />
           <Row label="Boekhouding" value={entity?.name} />
           {type === "item" ? (
-            <Row label="Debiteur/crediteur" value={currentCounterparty?.name} />
+            <Row
+              label="Debiteur/crediteur"
+              value={
+                currentCounterparty ? (
+                  <button
+                    onClick={() => { onCounterpartyClick?.(currentCounterparty.id); onClose(); }}
+                    className="underline decoration-dotted hover:text-slate-900"
+                  >
+                    {currentCounterparty.name}
+                  </button>
+                ) : null
+              }
+            />
           ) : (
             <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-50">
               <span className="text-[11px] text-slate-400 shrink-0 pt-1.5">Debiteur/crediteur</span>
               <div className="flex-1 min-w-0">
                 {currentCounterparty ? (
                   <div className="flex items-center justify-end gap-2">
-                    <span className="text-xs text-slate-700">{currentCounterparty.name}</span>
+                    <button
+                      onClick={() => { onCounterpartyClick?.(currentCounterparty.id); onClose(); }}
+                      className="text-xs text-slate-700 underline decoration-dotted hover:text-slate-900"
+                    >
+                      {currentCounterparty.name}
+                    </button>
                     <button
                       onClick={() => { setCounterpartyInput(currentCounterparty.name); onUpdatePaymentCounterparty(record.id, null); }}
                       className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
