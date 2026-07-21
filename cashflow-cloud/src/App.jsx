@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.44.0";
+const APP_VERSION = "1.45.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2392,11 +2392,13 @@ export default function CashflowPlanner() {
           <BetalingenView
             payments={payments}
             entityById={entityById}
+            counterpartyById={counterpartyById}
             filteredEntityIds={filteredEntityIds}
             categories={categories}
             projects={projects}
             onOpenDetail={openDetail}
             onDeletePayment={deletePayment}
+            onCounterpartyClick={goToCounterparty}
           />
         ) : (
           <BoekhoudingenView
@@ -4921,7 +4923,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 // betalingen met "geen document nodig", die in het Koppelen-scherm nergens
 // verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
 // vallen.
-function BetalingenView({ payments, entityById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment }) {
+function BetalingenView({ payments, entityById, counterpartyById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
 
   function statusOf(p) {
@@ -4984,6 +4986,7 @@ function BetalingenView({ payments, entityById, filteredEntityIds, categories, p
             const status = statusOf(p);
             const category = p.categoryId ? (categories || []).find((c) => c.id === p.categoryId) : null;
             const project = p.projectId ? (projects || []).find((pr) => pr.id === p.projectId) : null;
+            const counterparty = p.counterpartyId ? counterpartyById[p.counterpartyId] : null;
             return (
               <div
                 key={p.id}
@@ -4992,7 +4995,20 @@ function BetalingenView({ payments, entityById, filteredEntityIds, categories, p
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <p className="text-sm text-slate-800 truncate">{p.description}</p>
+                    <p className="text-sm text-slate-800 truncate">
+                      {p.description}
+                      {counterparty && (
+                        <>
+                          {" — "}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
+                            className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                          >
+                            {counterparty.name}
+                          </button>
+                        </>
+                      )}
+                    </p>
                     <span
                       className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
                         status === "linked"
