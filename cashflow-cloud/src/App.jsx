@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.39.0";
+const APP_VERSION = "1.40.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -248,6 +248,7 @@ function counterpartyFromRecord(r) {
     vatNumber: r.fields.BTWNummer || "",
     accountNumber: r.fields.Rekeningnummer || "",
     address: r.fields.Adres || "",
+    priority: r.fields.Prioriteit || "",
   };
 }
 
@@ -329,6 +330,7 @@ function itemFromRecord(r) {
     categoryId: r.fields.Categorie?.[0] || null,
     projectId: r.fields.Project?.[0] || null,
     paymentIds: r.fields.Betalingen || [],
+    priority: r.fields.Prioriteit || "",
     paidDates,
   };
 }
@@ -354,7 +356,27 @@ function itemToFields(item) {
     Categorie: item.categoryId ? [item.categoryId] : [],
     Project: item.projectId ? [item.projectId] : [],
     BetaaldeData: JSON.stringify(item.paidDates || []),
+    Prioriteit: item.priority || "",
   };
+}
+
+// 3 niveaus, gekoppeld aan de debiteur/crediteur maar per post overrulebaar.
+// Leeg op de post = "neem over van de debiteur". Gebruikt in ItemForm,
+// CounterpartyView en de prioriteitsbadge op elke post-rij.
+const PRIORITY_LEVELS = [
+  { value: "Laag", label: "Laag", color: "#5B6570" },
+  { value: "Normaal", label: "Normaal", color: "#B4791F" },
+  { value: "Hoog", label: "Hoog", color: "#B3462C" },
+];
+function priorityMeta(value) {
+  return PRIORITY_LEVELS.find((p) => p.value === value) || null;
+}
+// De effectief geldende prioriteit voor een post: eigen waarde indien gezet,
+// anders die van de gekoppelde debiteur/crediteur, anders leeg.
+function effectivePriority(item, counterpartyById) {
+  if (item.priority) return item.priority;
+  const cp = item.counterpartyId ? counterpartyById[item.counterpartyId] : null;
+  return cp?.priority || "";
 }
 
 // ---------- bank statement (CAMT.053) import ----------
@@ -458,6 +480,7 @@ export default function CashflowPlanner() {
     recurrence: "once",
     endDate: "",
     viaPaypal: false,
+    priority: "",
   };
   const [form, setForm] = useState(emptyForm);
   const fileInputRef = useRef(null);
@@ -1553,6 +1576,19 @@ export default function CashflowPlanner() {
     return created.id;
   }
 
+  // Wordt zowel automatisch aangeroepen (propagatie vanuit een post die als
+  // eerste een prioriteit krijgt) als rechtstreeks vanuit het Crediteuren-
+  // scherm, waar de debiteur/crediteur-prioriteit ook manueel ingesteld kan
+  // worden.
+  async function updateCounterpartyPriority(counterpartyId, priority) {
+    try {
+      await atUpdate(TABLES.counterparties, [{ id: counterpartyId, fields: { Prioriteit: priority || "" } }]);
+      setCounterparties((prev) => prev.map((c) => (c.id === counterpartyId ? { ...c, priority: priority || "" } : c)));
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // ---- mutations ----
   function resetForm() {
     setForm(emptyForm);
@@ -1588,8 +1624,22 @@ export default function CashflowPlanner() {
         recurrence: form.recurrence,
         endDate: form.recurrence !== "once" && form.endDate ? form.endDate : null,
         viaPaypal: !!form.viaPaypal,
+        priority: form.priority || "",
         paidDates: editingId ? items.find((i) => i.id === editingId)?.paidDates || [] : [],
       };
+
+      // Standaard neemt een post de prioriteit van zijn debiteur/crediteur
+      // over; hier gebeurt de omgekeerde uitzondering: als de post een eigen
+      // prioriteit krijgt terwijl de debiteur/crediteur nog geen prioriteit
+      // heeft, wordt die waarde meteen naar de debiteur/crediteur gekopieerd
+      // zodat toekomstige posten daar automatisch van overerven.
+      if (draft.priority && counterpartyId) {
+        const cp = counterparties.find((c) => c.id === counterpartyId);
+        if (cp && !cp.priority) {
+          await updateCounterpartyPriority(counterpartyId, draft.priority);
+        }
+      }
+
       const fields = itemToFields(draft);
       if (editingId) {
         const [rec] = await atUpdate(TABLES.items, [{ id: editingId, fields }]);
@@ -1622,6 +1672,7 @@ export default function CashflowPlanner() {
       recurrence: item.recurrence,
       endDate: item.endDate || "",
       viaPaypal: !!item.viaPaypal,
+      priority: item.priority || "",
     });
     setShowForm(false);
     setEditingId(item.id);
@@ -2245,6 +2296,7 @@ export default function CashflowPlanner() {
             onLinkPayment={linkPaymentToDocument}
             onUnlinkPayment={unlinkPaymentFromDocument}
             onOpenDetail={openDetail}
+            onUpdatePriority={updateCounterpartyPriority}
           />
         ) : view === "afpunten" ? (
           <ReconciliationView
@@ -2480,6 +2532,8 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
   const linkCandidates = (payments || [])
     .filter((p) => p.entityId === row.item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const effPriority = row.item.priority || counterparty?.priority || "";
+  const priorityInfo = priorityMeta(effPriority);
 
   return (
     <>
@@ -2509,6 +2563,15 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
           )}
           {row.item.source === "Billtobox" && (
             <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#4C4E8A] bg-[#EEEEF6] rounded px-1.5 py-0.5 shrink-0">Billtobox</span>
+          )}
+          {priorityInfo && priorityInfo.value !== "Laag" && (
+            <span
+              className="text-[9.5px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 shrink-0"
+              style={{ color: priorityInfo.color, background: `${priorityInfo.color}1A` }}
+              title={row.item.priority ? "Eigen prioriteit op deze post" : "Overgenomen van debiteur/crediteur"}
+            >
+              {priorityInfo.label}
+            </span>
           )}
         </div>
         <p className={`text-sm truncate ${row.paid ? "line-through text-[#93999F]" : "text-[#12181F]"}`}>
@@ -2669,6 +2732,45 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
       <datalist id="counterparty-suggestions">
         {counterparties.map((c) => <option key={c.id} value={c.name} />)}
       </datalist>
+
+      {(() => {
+        const matchedCp = counterparties.find(
+          (c) => c.name.trim().toLowerCase() === form.counterparty.trim().toLowerCase()
+        );
+        const inherited = matchedCp?.priority || "";
+        return (
+          <div>
+            <label className="text-[11px] text-slate-400">Prioriteit</label>
+            <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs mt-0.5">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, priority: "" })}
+                className={`flex-1 py-1.5 rounded-md ${!form.priority ? "bg-white shadow-sm text-slate-700 font-medium" : "text-slate-400"}`}
+              >
+                Standaard
+              </button>
+              {PRIORITY_LEVELS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setForm({ ...form, priority: p.value })}
+                  className="flex-1 py-1.5 rounded-md font-medium"
+                  style={form.priority === p.value ? { background: "white", color: p.color, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" } : { color: "#94A3B8" }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {form.priority
+                ? "Overrulet de debiteur/crediteur. Heeft die nog geen eigen prioriteit, dan wordt deze waarde automatisch ingesteld als standaard voor de debiteur/crediteur."
+                : inherited
+                ? `Standaard neemt over van de debiteur/crediteur: ${inherited}.`
+                : "Standaard — deze debiteur/crediteur heeft nog geen eigen prioriteit ingesteld."}
+            </p>
+          </div>
+        );
+      })()}
 
       <input
         value={form.accountNumber}
@@ -3816,7 +3918,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
@@ -4015,7 +4117,31 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               </div>
             </button>
             {open && (
-              <div className="border-t border-slate-100 divide-y divide-slate-50">
+              <div className="border-t border-slate-100">
+                <div className="px-3.5 py-2.5 flex items-center gap-2 bg-slate-50/60 border-b border-slate-100">
+                  <span className="text-[11px] text-slate-400 shrink-0">Standaardprioriteit voor deze debiteur/crediteur:</span>
+                  <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => onUpdatePriority(counterparty.id, "")}
+                      className={`px-2 py-1 rounded-md ${!counterparty.priority ? "bg-slate-100 text-slate-600 font-medium" : "text-slate-400"}`}
+                    >
+                      Geen
+                    </button>
+                    {PRIORITY_LEVELS.map((p) => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        onClick={() => onUpdatePriority(counterparty.id, p.value)}
+                        className="px-2 py-1 rounded-md font-medium"
+                        style={counterparty.priority === p.value ? { background: `${p.color}1A`, color: p.color } : { color: "#94A3B8" }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-50">
                 {cpItems
                   .slice()
                   .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1))
@@ -4277,6 +4403,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                       </React.Fragment>
                     );
                   })}
+                </div>
               </div>
             )}
           </div>
