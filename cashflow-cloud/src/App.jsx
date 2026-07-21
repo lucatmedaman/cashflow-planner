@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.50.0";
+const APP_VERSION = "1.51.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -3545,18 +3545,16 @@ function KoppelenView({
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer ${selected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-slate-800 truncate">
-                      {p.description}
-                      {cp && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
-                          className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
-                        >
-                          {" — "}{cp.name}
-                        </button>
-                      )}
-                    </p>
+                    <p className="text-sm text-slate-800 truncate">{p.description}</p>
                     <p className="text-[11px] text-slate-400">{entity?.name} · {p.date} · {p.source}</p>
+                    {cp && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                        className="text-[11px] text-slate-400 underline decoration-dotted hover:text-slate-600"
+                      >
+                        {cp.name}
+                      </button>
+                    )}
                   </div>
                   <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
@@ -3689,18 +3687,16 @@ function KoppelenView({
                   className={`flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50 ${docSelected ? "bg-slate-900/5" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-slate-800 truncate">
-                      {doc.description}
-                      {cp && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
-                          className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
-                        >
-                          {" — "}{cp.name}
-                        </button>
-                      )}
-                    </p>
+                    <p className="text-sm text-slate-800 truncate">{doc.description}</p>
                     <p className="text-[11px] text-slate-400">{entity?.name} · Verval: {doc.dueDate}</p>
+                    {cp && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(cp.id); }}
+                        className="text-[11px] text-slate-400 underline decoration-dotted hover:text-slate-600"
+                      >
+                        {cp.name}
+                      </button>
+                    )}
                   </div>
                   <span className={`text-sm font-medium shrink-0 ${doc.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
                     {doc.direction === "in" ? "+" : "−"}{eur(doc.amount)}
