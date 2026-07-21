@@ -2022,7 +2022,7 @@ export default function CashflowPlanner() {
       <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 lg:px-8 pb-28">
         {/* Header */}
         <header className="pt-6 pb-4 sticky top-0 bg-[#F4F6F5]/95 backdrop-blur z-20">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <h1 className="font-display text-[22px] font-medium tracking-tight text-[#12181F] flex items-center gap-2">
                 Cashflow
@@ -2103,23 +2103,23 @@ export default function CashflowPlanner() {
             ) : null}
           </div>
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2 overflow-x-auto -mx-4 px-4 pb-1">
             <button
               onClick={exportData}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
             >
               <Download className="w-3.5 h-3.5" /> Exporteer JSON
             </button>
             <button
               onClick={triggerImport}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               title="Importeert als nieuwe records in Airtable"
             >
               <Upload className="w-3.5 h-3.5" /> Importeer JSON
             </button>
             <button
               onClick={openBankModal}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               title="CAMT.053 bankuittreksel inlezen en matchen"
             >
               <Landmark className="w-3.5 h-3.5" /> Bank importeren
@@ -2127,7 +2127,7 @@ export default function CashflowPlanner() {
             <button
               onClick={triggerPocketsmithSync}
               disabled={pocketsmithSyncing}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
               title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
             >
               {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -2136,13 +2136,13 @@ export default function CashflowPlanner() {
             {(airtableError || offlineMode) && (
               <button
                 onClick={retrySync}
-                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Opnieuw verbinden
               </button>
             )}
             <input ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={handleImportFile} />
-            {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
+            {importMsg && <span className="shrink-0 text-xs text-slate-500">{importMsg}</span>}
           </div>
 
           {airtableError && (
