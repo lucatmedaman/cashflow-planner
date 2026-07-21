@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Building2, ChevronDown, X, Edit2, Copy,
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
-  Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText
+  Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText, ArrowUpDown
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.38.0";
+const APP_VERSION = "1.39.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -3098,6 +3098,11 @@ function KoppelenView({
   const [creatingDoc, setCreatingDoc] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState(null);
+  // Volgorde van "Ongekoppelde documenten" — bewust apart instelbaar, want bij
+  // het koppelen zoek je soms het oudste (langst openstaande) document eerst,
+  // en soms net het duurste of een specifieke naam.
+  const [docSortField, setDocSortField] = useState("dueDate"); // dueDate | amount | description
+  const [docSortDir, setDocSortDir] = useState("asc"); // asc | desc
 
   const unlinkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
@@ -3109,7 +3114,13 @@ function KoppelenView({
       (it.paymentIds || []).length === 0 &&
       (it.paidDates || []).length === 0
     )
-    .sort((a, b) => (a.dueDate < b.dueDate ? 1 : -1));
+    .sort((a, b) => {
+      let cmp;
+      if (docSortField === "amount") cmp = a.amount - b.amount;
+      else if (docSortField === "description") cmp = a.description.localeCompare(b.description);
+      else cmp = a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0;
+      return docSortDir === "asc" ? cmp : -cmp;
+    });
 
   const linkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length > 0)
@@ -3375,6 +3386,27 @@ function KoppelenView({
             {selectedPayment && <span className="text-slate-400 font-normal"> — klik om te koppelen aan "{selectedPayment.description}"</span>}
           </p>
         </button>
+
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <select
+            value={docSortField}
+            onChange={(e) => setDocSortField(e.target.value)}
+            className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
+          >
+            <option value="dueDate">Sorteer op vervaldatum</option>
+            <option value="amount">Sorteer op bedrag</option>
+            <option value="description">Sorteer op omschrijving</option>
+          </select>
+          <button
+            onClick={() => setDocSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="flex items-center gap-1 text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+            title={docSortDir === "asc" ? "Oplopend — klik voor aflopend" : "Aflopend — klik voor oplopend"}
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {docSortDir === "asc" ? "Oplopend" : "Aflopend"}
+          </button>
+        </div>
+
         {showUnlinkedDocs && (unlinkedDocs.length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-4 bg-white border border-slate-200 rounded-xl">Niets openstaand.</p>
         ) : (
