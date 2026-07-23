@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.54.0";
+const APP_VERSION = "1.54.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -489,6 +489,7 @@ export default function CashflowPlanner() {
   const ublFileInputRef = useRef(null);
   const [ublDraft, setUblDraft] = useState(null); // {entityId, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning}
   const [ublSaving, setUblSaving] = useState(false);
+  const [ublError, setUblError] = useState("");
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
@@ -1646,7 +1647,11 @@ export default function CashflowPlanner() {
     reader.readAsText(file);
   }
   async function submitUblImport() {
-    if (!ublDraft || !ublDraft.entityId || !ublDraft.amount || !ublDraft.dueDate) return;
+    if (!ublDraft) return;
+    if (!ublDraft.entityId) { setUblError("Kies eerst een boekhouding."); return; }
+    if (!ublDraft.amount || Number(ublDraft.amount) <= 0) { setUblError("Vul een geldig bedrag in."); return; }
+    if (!ublDraft.dueDate) { setUblError("Vul een vervaldatum in."); return; }
+    setUblError("");
     setUblSaving(true);
     try {
       const counterpartyId = await resolveCounterpartyId(ublDraft.counterparty);
@@ -1676,6 +1681,7 @@ export default function CashflowPlanner() {
       setUblDraft(null);
     } catch (err) {
       setAirtableError(err.message);
+      setUblError(`Opslaan mislukt: ${err.message}`);
     } finally {
       setUblSaving(false);
     }
@@ -2820,15 +2826,18 @@ export default function CashflowPlanner() {
                 />
               </div>
             </div>
+            {ublError && (
+              <p className="text-[11px] text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{ublError}</p>
+            )}
             <div className="flex gap-2 pt-1">
               <button
                 onClick={submitUblImport}
-                disabled={ublSaving || !ublDraft.entityId || !ublDraft.amount || !ublDraft.dueDate}
+                disabled={ublSaving}
                 className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40"
               >
                 {ublSaving ? "Bezig…" : "Post aanmaken"}
               </button>
-              <button onClick={() => setUblDraft(null)} className="px-4 rounded-lg border border-slate-200 text-sm">
+              <button onClick={() => { setUblDraft(null); setUblError(""); }} className="px-4 rounded-lg border border-slate-200 text-sm">
                 Annuleer
               </button>
             </div>
