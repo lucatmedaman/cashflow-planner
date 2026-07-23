@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.53.2";
+const APP_VERSION = "1.54.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -486,6 +486,9 @@ export default function CashflowPlanner() {
   };
   const [form, setForm] = useState(emptyForm);
   const fileInputRef = useRef(null);
+  const ublFileInputRef = useRef(null);
+  const [ublDraft, setUblDraft] = useState(null); // {entityId, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning}
+  const [ublSaving, setUblSaving] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
@@ -1591,6 +1594,93 @@ export default function CashflowPlanner() {
   const counterpartiesRef = useRef(counterparties);
   useEffect(() => { counterpartiesRef.current = counterparties; }, [counterparties]);
 
+  // Zelfde extractielogica als api/billtobox-import.js (incl. de fix die het
+  // UBLExtensions-blok wegknipt vóór elke tag-extractie — dat blok bevat
+  // metadata met een eigen <cbc:ID>, die anders per ongeluk als factuurnummer
+  // gepakt wordt). Bewust gedupliceerd i.p.v. gedeeld: dit draait in de
+  // browser, het origineel in een serverless functie.
+  function extractUblTag(xml, tagName) {
+    const re = new RegExp(`<(?:[\\w-]+:)?${tagName}[^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?${tagName}>`, "i");
+    const m = xml.match(re);
+    return m ? m[1].trim() : null;
+  }
+  function parseUblXml(rawXml) {
+    const xml = rawXml.replace(/<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/, "");
+    const invoiceNumber = extractUblTag(xml, "ID") || "(onbekend nummer)";
+    const issueDate = extractUblTag(xml, "IssueDate");
+    const dueDate = extractUblTag(xml, "DueDate") || issueDate || todayISO();
+    const payableAmountRaw = extractUblTag(xml, "PayableAmount");
+    const amount = payableAmountRaw ? Math.abs(parseFloat(payableAmountRaw)) : 0;
+    const supplierBlock = extractUblTag(xml, "AccountingSupplierParty") || xml;
+    const supplierName =
+      extractUblTag(supplierBlock, "RegistrationName") ||
+      extractUblTag(supplierBlock, "Name") ||
+      "Onbekende leverancier";
+    const paymentBlock = extractUblTag(xml, "PaymentMeans") || "";
+    const payeeAccountBlock = extractUblTag(paymentBlock, "PayeeFinancialAccount") || "";
+    const iban = extractUblTag(payeeAccountBlock, "ID") || "";
+    return {
+      description: `${supplierName} — factuur ${invoiceNumber}`,
+      counterparty: supplierName,
+      amount: amount || "",
+      dueDate,
+      invoiceDate: issueDate || "",
+      accountNumber: iban,
+      parseWarning: amount ? null : "Kon geen bedrag (PayableAmount) uit dit bestand halen — vul het handmatig aan.",
+    };
+  }
+  function handleUblFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // zodat hetzelfde bestand opnieuw gekozen kan worden
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parsed = parseUblXml(String(reader.result || ""));
+      setUblDraft({
+        entityId: activeEntity !== "all" ? activeEntity : "",
+        fileName: file.name,
+        ...parsed,
+      });
+    };
+    reader.onerror = () => setAirtableError("Kon het bestand niet lezen.");
+    reader.readAsText(file);
+  }
+  async function submitUblImport() {
+    if (!ublDraft || !ublDraft.entityId || !ublDraft.amount || !ublDraft.dueDate) return;
+    setUblSaving(true);
+    try {
+      const counterpartyId = await resolveCounterpartyId(ublDraft.counterparty);
+      const draft = {
+        entityId: ublDraft.entityId,
+        description: ublDraft.description.trim(),
+        accountNumber: ublDraft.accountNumber || "",
+        note: "Handmatig ingelezen via 'UBL inlezen'",
+        counterpartyId,
+        amount: Math.abs(Number(ublDraft.amount)),
+        direction: "uit",
+        dueDate: ublDraft.dueDate,
+        payDate: ublDraft.dueDate,
+        invoiceDate: ublDraft.invoiceDate || null,
+        recurrence: "once",
+        endDate: null,
+        viaPaypal: false,
+        priority: "",
+        paidDates: [],
+      };
+      const fields = itemToFields(draft);
+      fields.Bron = "Billtobox";
+      const [rec] = await atCreate(TABLES.items, [{ fields }]);
+      const created = itemFromRecord(rec);
+      setItems((prev) => [...prev, created]);
+      markSynced();
+      setUblDraft(null);
+    } catch (err) {
+      setAirtableError(err.message);
+    } finally {
+      setUblSaving(false);
+    }
+  }
+
   async function resolveCounterpartyId(rawName) {
     const trimmed = (rawName || "").trim();
     if (!trimmed) return null;
@@ -2022,7 +2112,7 @@ export default function CashflowPlanner() {
       <div className="max-w-3xl lg:max-w-5xl xl:max-w-6xl mx-auto px-4 lg:px-8 pb-28">
         {/* Header */}
         <header className="pt-6 pb-4 sticky top-0 bg-[#F4F6F5]/95 backdrop-blur z-20">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center justify-between">
             <div>
               <h1 className="font-display text-[22px] font-medium tracking-tight text-[#12181F] flex items-center gap-2">
                 Cashflow
@@ -2103,31 +2193,45 @@ export default function CashflowPlanner() {
             ) : null}
           </div>
 
-          <div className="mt-2 flex items-center gap-2 overflow-x-auto -mx-4 px-4 pb-1">
+          <div className="mt-2 flex items-center gap-2">
             <button
               onClick={exportData}
-              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
             >
               <Download className="w-3.5 h-3.5" /> Exporteer JSON
             </button>
             <button
               onClick={triggerImport}
-              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               title="Importeert als nieuwe records in Airtable"
             >
               <Upload className="w-3.5 h-3.5" /> Importeer JSON
             </button>
             <button
               onClick={openBankModal}
-              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               title="CAMT.053 bankuittreksel inlezen en matchen"
             >
               <Landmark className="w-3.5 h-3.5" /> Bank importeren
             </button>
             <button
+              onClick={() => ublFileInputRef.current?.click()}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              title="Eén UBL-factuur (.xml) rechtstreeks inlezen als post — handig als Billtobox een factuur toch niet doorstuurt"
+            >
+              <FileText className="w-3.5 h-3.5" /> UBL inlezen
+            </button>
+            <input
+              ref={ublFileInputRef}
+              type="file"
+              accept=".xml,text/xml,application/xml"
+              className="hidden"
+              onChange={handleUblFileSelected}
+            />
+            <button
               onClick={triggerPocketsmithSync}
               disabled={pocketsmithSyncing}
-              className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
               title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
             >
               {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -2136,13 +2240,13 @@ export default function CashflowPlanner() {
             {(airtableError || offlineMode) && (
               <button
                 onClick={retrySync}
-                className="shrink-0 flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+                className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
               >
                 <RefreshCw className="w-3.5 h-3.5" /> Opnieuw verbinden
               </button>
             )}
             <input ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={handleImportFile} />
-            {importMsg && <span className="shrink-0 text-xs text-slate-500">{importMsg}</span>}
+            {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
           </div>
 
           {airtableError && (
@@ -2628,6 +2732,106 @@ export default function CashflowPlanner() {
               Sluiten
             </button>
             {copyMsg && <p className="text-xs text-slate-500 mt-2">{copyMsg}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* UBL-inleesmodal: preview/bewerken vóór opslaan */}
+      {ublDraft && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-4 space-y-2.5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-800">UBL-factuur inlezen</p>
+              <button onClick={() => setUblDraft(null)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-[11px] text-slate-400 truncate">{ublDraft.fileName}</p>
+            {ublDraft.parseWarning && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                ⚠ {ublDraft.parseWarning}
+              </p>
+            )}
+            <div>
+              <label className="text-[11px] text-slate-400">Boekhouding</label>
+              <select
+                value={ublDraft.entityId}
+                onChange={(e) => setUblDraft({ ...ublDraft, entityId: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+              >
+                <option value="" disabled>Kies een boekhouding…</option>
+                {sortedEntities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-400">Omschrijving</label>
+              <input
+                value={ublDraft.description}
+                onChange={(e) => setUblDraft({ ...ublDraft, description: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-400">Debiteur/crediteur</label>
+              <input
+                value={ublDraft.counterparty}
+                onChange={(e) => setUblDraft({ ...ublDraft, counterparty: e.target.value })}
+                list="ubl-counterparty-suggestions"
+                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+              />
+              <datalist id="ubl-counterparty-suggestions">
+                {counterparties.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.name} />)}
+              </datalist>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-slate-400">Bedrag</label>
+                <input
+                  type="number" step="0.01"
+                  value={ublDraft.amount}
+                  onChange={(e) => setUblDraft({ ...ublDraft, amount: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">Vervaldatum</label>
+                <input
+                  type="date"
+                  value={ublDraft.dueDate}
+                  onChange={(e) => setUblDraft({ ...ublDraft, dueDate: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-slate-400">Factuurdatum</label>
+                <input
+                  type="date"
+                  value={ublDraft.invoiceDate}
+                  onChange={(e) => setUblDraft({ ...ublDraft, invoiceDate: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">Rekeningnummer</label>
+                <input
+                  value={ublDraft.accountNumber}
+                  onChange={(e) => setUblDraft({ ...ublDraft, accountNumber: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={submitUblImport}
+                disabled={ublSaving || !ublDraft.entityId || !ublDraft.amount || !ublDraft.dueDate}
+                className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40"
+              >
+                {ublSaving ? "Bezig…" : "Post aanmaken"}
+              </button>
+              <button onClick={() => setUblDraft(null)} className="px-4 rounded-lg border border-slate-200 text-sm">
+                Annuleer
+              </button>
+            </div>
           </div>
         </div>
       )}
