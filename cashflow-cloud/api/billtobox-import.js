@@ -70,13 +70,6 @@ async function listCounterparties() {
   return data.records || [];
 }
 
-async function isAlreadyImported(ref) {
-  const url = `https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}?filterByFormula=${encodeURIComponent(`{BankRef}="${ref}"`)}&maxRecords=1`;
-  const res = await fetch(url, { headers: airtableHeaders() });
-  const data = await res.json();
-  return Array.isArray(data.records) && data.records.length > 0;
-}
-
 async function resolveCounterpartyId(name) {
   const records = await listCounterparties();
   const existing = records.find((r) => (r.fields.Naam || "").toLowerCase() === name.toLowerCase());
@@ -129,14 +122,20 @@ export default async function handler(req, res) {
       return;
     }
 
-    const xml = await readRawBody(req);
-    if (!xml || typeof xml !== "string" || !xml.includes("<")) {
+    const rawXml = await readRawBody(req);
+    if (!rawXml || typeof rawXml !== "string" || !rawXml.includes("<")) {
       // Likely Billtobox's "Verbinding testen" button, not a real invoice —
       // treat as a successful connection check rather than an error.
       console.log("billtobox-import: lege/niet-XML body ontvangen, behandeld als verbindingstest.");
       res.status(200).json({ status: "ok", note: "Verbinding werkt. Geen factuurgegevens ontvangen (test-payload)." });
       return;
     }
+    // UPData/Billtobox voegt een <ext:UBLExtensions>-blok toe vóór de echte
+    // factuurgegevens, met eigen metadata (incl. een <cbc:ID>UPData</cbc:ID>)
+    // en soms het volledige PDF-brondocument als base64. Zonder dit weg te
+    // knippen greep extractTag(xml, "ID") de EERSTE <ID>-tag in het hele
+    // document — dat was dus "UPData", niet het echte factuurnummer.
+    const xml = rawXml.replace(/<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/, "");
 
     const invoiceNumber = extractTag(xml, "ID") || "(onbekend nummer)";
     const issueDate = extractTag(xml, "IssueDate");
@@ -160,22 +159,6 @@ export default async function handler(req, res) {
     const iban = extractTag(payeeAccountBlock, "ID") || "";
 
     const counterpartyId = await resolveCounterpartyId(supplierName);
-    const billtoboxRef = `billtobox-${invoiceNumber}`;
-
-    if (await isAlreadyImported(billtoboxRef)) {
-      res.status(200).json({ status: "skipped", reason: "Al eerder geïmporteerd", ref: billtoboxRef });
-      return;
-    }
-
-    const snapshot = JSON.stringify({
-      ref: billtoboxRef,
-      amount,
-      direction: "uit",
-      bookingDate: dueDate,
-      counterpartyName: supplierName,
-      remittance: `Factuur ${invoiceNumber}`,
-      wasCreated: true,
-    });
 
     const fields = {
       Omschrijving: `${supplierName} — factuur ${invoiceNumber}`,
@@ -190,8 +173,6 @@ export default async function handler(req, res) {
       Herhaling: "once",
       Bron: "Billtobox",
       Gelezen: false,
-      BankRef: billtoboxRef,
-      BankSnapshot: snapshot,
       BetaaldeData: "[]",
     };
 
