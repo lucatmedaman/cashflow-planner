@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.54.2";
+const APP_VERSION = "1.55.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -487,7 +487,9 @@ export default function CashflowPlanner() {
   const [form, setForm] = useState(emptyForm);
   const fileInputRef = useRef(null);
   const ublFileInputRef = useRef(null);
-  const [ublDraft, setUblDraft] = useState(null); // {entityId, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning}
+  const pdfFileInputRef = useRef(null);
+  const [pdfParsing, setPdfParsing] = useState(false);
+  const [ublDraft, setUblDraft] = useState(null); // {entityId, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning, source}
   const [ublSaving, setUblSaving] = useState(false);
   const [ublError, setUblError] = useState("");
   const [importMsg, setImportMsg] = useState("");
@@ -1640,12 +1642,122 @@ export default function CashflowPlanner() {
       setUblDraft({
         entityId: activeEntity !== "all" ? activeEntity : "",
         fileName: file.name,
+        source: "UBL",
         ...parsed,
       });
+      setUblError("");
     };
     reader.onerror = () => setAirtableError("Kon het bestand niet lezen.");
     reader.readAsText(file);
   }
+
+  // PDF-facturen hebben geen gestructureerde tags zoals UBL — dit is dus
+  // altijd een ruwe gok op basis van tekstherkenning (via pdf.js, dynamisch
+  // geladen), nooit een garantie. Vandaar de permanente waarschuwing en het
+  // feit dat élk veld hier standaard leeg/onzeker mag zijn: de gebruiker
+  // moet alles nakijken in het reviewscherm vóór opslaan.
+  async function ensurePdfJsLoaded() {
+    if (window.pdfjsLib) return window.pdfjsLib;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Kon de PDF-leesbibliotheek niet laden (controleer je internetverbinding)."));
+      document.head.appendChild(script);
+    });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    return window.pdfjsLib;
+  }
+  async function extractPdfText(arrayBuffer) {
+    const pdfjsLib = await ensurePdfJsLoaded();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += content.items.map((it) => it.str).join(" ") + "\n";
+    }
+    return fullText;
+  }
+  const DUTCH_MONTHS = { januari: 1, februari: 2, maart: 3, april: 4, mei: 5, juni: 6, juli: 7, augustus: 8, september: 9, oktober: 10, november: 11, december: 12 };
+  function parseLooseDate(str) {
+    if (!str) return null;
+    let m = str.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    m = str.match(/(\d{1,2})\s+(januari|februari|maart|april|mei|juni|juli|augustus|september|oktober|november|december)\s+(\d{4})/i);
+    if (m) return `${m[3]}-${String(DUTCH_MONTHS[m[2].toLowerCase()]).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    return null;
+  }
+  function parsePdfInvoiceText(rawText) {
+    const text = rawText.replace(/[ \t]+/g, " ");
+    const flat = text.replace(/\s+/g, " ");
+
+    let amount = "";
+    const totaalMatch =
+      flat.match(/Totaal[^€\d]{0,30}€\s*([\d]{1,3}(?:[.,]\d{3})*[.,]\d{2})/i) ||
+      flat.match(/Te betalen[^€\d]{0,30}€\s*([\d]{1,3}(?:[.,]\d{3})*[.,]\d{2})/i);
+    if (totaalMatch) {
+      amount = totaalMatch[1].replace(/\./g, "").replace(",", ".");
+    } else {
+      const allAmounts = [...flat.matchAll(/€\s*([\d]{1,3}(?:[.,]\d{3})*[.,]\d{2})/g)]
+        .map((m) => parseFloat(m[1].replace(/\./g, "").replace(",", ".")))
+        .filter((n) => !isNaN(n));
+      if (allAmounts.length) amount = Math.max(...allAmounts).toFixed(2);
+    }
+
+    const invoiceNumMatch = flat.match(/Factuurnummer[:\s]+([A-Za-z0-9\-\/]+)/i);
+    const invoiceNumber = invoiceNumMatch ? invoiceNumMatch[1] : "";
+
+    const factDatumMatch = flat.match(/Factuurdatum[:\s]+([^€]{5,25}?)(?=\s{2,}|Factuurnummer|$)/i) || flat.match(/Factuurdatum[:\s]+(\S+\s+\S+\s+\S+)/i);
+    const invoiceDate = factDatumMatch ? parseLooseDate(factDatumMatch[1]) || "" : "";
+
+    const vervalMatch =
+      flat.match(/(?:Vervaldatum|Te betalen (?:v[oó]{1,2}r|op))[^\d]{0,20}(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i) ||
+      flat.match(/domicili[eë]ring van uw rekening opgevraagd[^\d]{0,10}(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i) ||
+      flat.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})[^\d]{0,15}(?:via domicili[eë]ring|opgevraagd)/i);
+    const dueDate = vervalMatch ? parseLooseDate(vervalMatch[1]) || "" : "";
+
+    // Zwakste stap: leverancier gokken uit de eerste substantiële tekstregel.
+    const firstLine =
+      text.split("\n").map((l) => l.trim()).find((l) => l.length > 2 && !/^\d+([.,]\d+)?$/.test(l)) || "";
+
+    return {
+      description: invoiceNumber ? `${firstLine} — factuur ${invoiceNumber}` : firstLine,
+      counterparty: firstLine,
+      amount,
+      dueDate: dueDate || invoiceDate || todayISO(),
+      invoiceDate,
+      accountNumber: "",
+      parseWarning: "PDF-herkenning is een ruwe gok, geen gestructureerde data zoals bij UBL — controleer élk veld hieronder (zeker crediteur en datums) vóór je opslaat.",
+    };
+  }
+  function handlePdfFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPdfParsing(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const text = await extractPdfText(reader.result);
+        const parsed = parsePdfInvoiceText(text);
+        setUblDraft({
+          entityId: activeEntity !== "all" ? activeEntity : "",
+          fileName: file.name,
+          source: "PDF",
+          ...parsed,
+        });
+        setUblError("");
+      } catch (err) {
+        setAirtableError(`PDF inlezen mislukt: ${err.message}`);
+      } finally {
+        setPdfParsing(false);
+      }
+    };
+    reader.onerror = () => { setAirtableError("Kon het bestand niet lezen."); setPdfParsing(false); };
+    reader.readAsArrayBuffer(file);
+  }
+
   async function submitUblImport() {
     if (!ublDraft) return;
     if (!ublDraft.entityId) { setUblError("Kies eerst een boekhouding."); return; }
@@ -1659,7 +1771,7 @@ export default function CashflowPlanner() {
         entityId: ublDraft.entityId,
         description: ublDraft.description.trim(),
         accountNumber: ublDraft.accountNumber || "",
-        note: "Handmatig ingelezen via 'UBL inlezen'",
+        note: ublDraft.source === "PDF" ? "Handmatig ingelezen via 'PDF-factuur inlezen' — controleer de gegevens" : "Handmatig ingelezen via 'UBL inlezen'",
         counterpartyId,
         amount: Math.abs(Number(ublDraft.amount)),
         direction: "uit",
@@ -1673,7 +1785,7 @@ export default function CashflowPlanner() {
         paidDates: [],
       };
       const fields = itemToFields(draft);
-      fields.Bron = "Billtobox";
+      fields.Bron = ublDraft.source === "PDF" ? "Handmatig" : "Billtobox";
       const [rec] = await atCreate(TABLES.items, [{ fields }]);
       const created = itemFromRecord(rec);
       setItems((prev) => [...prev, created]);
@@ -2235,6 +2347,22 @@ export default function CashflowPlanner() {
               onChange={handleUblFileSelected}
             />
             <button
+              onClick={() => pdfFileInputRef.current?.click()}
+              disabled={pdfParsing}
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
+              title="Een factuur als PDF inlezen als post — minder betrouwbaar dan UBL, alles moet gecontroleerd worden vóór opslaan"
+            >
+              {pdfParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+              PDF-factuur inlezen
+            </button>
+            <input
+              ref={pdfFileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={handlePdfFileSelected}
+            />
+            <button
               onClick={triggerPocketsmithSync}
               disabled={pocketsmithSyncing}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
@@ -2747,7 +2875,7 @@ export default function CashflowPlanner() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-md w-full p-4 space-y-2.5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-slate-800">UBL-factuur inlezen</p>
+              <p className="text-sm font-medium text-slate-800">{ublDraft.source === "PDF" ? "PDF-factuur inlezen" : "UBL-factuur inlezen"}</p>
               <button onClick={() => setUblDraft(null)}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <p className="text-[11px] text-slate-400 truncate">{ublDraft.fileName}</p>
