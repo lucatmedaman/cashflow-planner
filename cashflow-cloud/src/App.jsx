@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.54.1";
+const APP_VERSION = "1.54.2";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -358,7 +358,7 @@ function itemToFields(item) {
     Categorie: item.categoryId ? [item.categoryId] : [],
     Project: item.projectId ? [item.projectId] : [],
     BetaaldeData: JSON.stringify(item.paidDates || []),
-    Prioriteit: item.priority || "",
+    Prioriteit: item.priority || null,
   };
 }
 
@@ -1705,7 +1705,7 @@ export default function CashflowPlanner() {
   // worden.
   async function updateCounterpartyPriority(counterpartyId, priority) {
     try {
-      await atUpdate(TABLES.counterparties, [{ id: counterpartyId, fields: { Prioriteit: priority || "" } }]);
+      await atUpdate(TABLES.counterparties, [{ id: counterpartyId, fields: { Prioriteit: priority || null } }]);
       setCounterparties((prev) => prev.map((c) => (c.id === counterpartyId ? { ...c, priority: priority || "" } : c)));
     } catch (err) {
       setAirtableError(err.message);
