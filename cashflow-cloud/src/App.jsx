@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.57.0";
+const APP_VERSION = "1.58.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -391,6 +391,93 @@ function findEntityByIban(entities, iban) {
   return entities.find((e) => e.iban && e.iban === clean) || null;
 }
 
+// Bank-CSV (puntkomma-gescheiden export zoals BNP Paribas Fortis die levert)
+// rechtstreeks inlezen, met exact dezelfde uitkomststructuur als
+// parseCamt053 — zodat de rest van de importflow (matching, dedup,
+// crediteur-herkenning) identiek blijft. Dit vervangt de losse
+// conversiescripts die tot nu toe per CSV nodig waren.
+// - Geweigerde verrichtingen (Status ≠ "Geaccepteerd") worden overgeslagen.
+// - Unieke referentie: BANKREFERENTIE uit de Details-kolom; fallback
+//   IBAN-volgnummer.
+// - Het volgnummer blijft zichtbaar bewaard: als suffix in de mededeling
+//   én als apart veld in de ruwe brongegevens van elke betaling.
+function parseBankCsv(csvText) {
+  const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) throw new Error("CSV bevat geen gegevensrijen.");
+  const header = lines[0].split(";").map((h) => h.trim());
+  const col = (name) => header.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+  const idx = {
+    volgnummer: col("Volgnummer"),
+    datum: col("Uitvoeringsdatum"),
+    bedrag: col("Bedrag"),
+    rekening: col("Rekeningnummer"),
+    tegenpartij: col("Tegenpartij"),
+    naam: col("Naam van de tegenpartij"),
+    mededeling: col("Mededeling"),
+    details: col("Details"),
+    status: col("Status"),
+  };
+  if (idx.datum < 0 || idx.bedrag < 0 || idx.rekening < 0) {
+    throw new Error("Dit lijkt geen bank-CSV: verwachte kolommen (Uitvoeringsdatum, Bedrag, Rekeningnummer) ontbreken.");
+  }
+
+  const REF_RE = /BANKREFERENTIE\s*:\s*(\S+)/;
+  const seenRefs = new Set();
+  let dupCount = 0;
+  let iban = null;
+  const entries = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    // Eenvoudige puntkomma-splitsing volstaat: deze bankexports gebruiken
+    // geen quoted velden met puntkomma's erin.
+    const cells = lines[i].split(";");
+    const status = idx.status >= 0 ? (cells[idx.status] || "").trim() : "Geaccepteerd";
+    if (status && status !== "Geaccepteerd") continue;
+
+    const rowIban = (cells[idx.rekening] || "").trim().replace(/\s+/g, "").toUpperCase();
+    if (!iban && rowIban) iban = rowIban;
+
+    const rawAmount = (cells[idx.bedrag] || "").trim();
+    if (!rawAmount) continue;
+    const amountNum = parseFloat(rawAmount.replace(/\./g, "").replace(",", "."));
+    if (isNaN(amountNum)) continue;
+
+    const rawDate = (cells[idx.datum] || "").trim();
+    const dm = rawDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!dm) continue;
+    const bookingDate = `${dm[3]}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
+
+    const volgnummer = idx.volgnummer >= 0 ? (cells[idx.volgnummer] || "").trim() : "";
+    const details = idx.details >= 0 ? (cells[idx.details] || "").trim() : "";
+    const refMatch = details.match(REF_RE);
+    let ref = refMatch ? refMatch[1] : `${rowIban}-${volgnummer || i}`;
+    if (seenRefs.has(ref)) {
+      dupCount++;
+      ref = `${ref}-dup${dupCount}`;
+    }
+    seenRefs.add(ref);
+
+    const counterpartyName = idx.naam >= 0 ? (cells[idx.naam] || "").trim() : "";
+    let remittance = idx.mededeling >= 0 ? (cells[idx.mededeling] || "").trim() : "";
+    if (!remittance) remittance = details.slice(0, 200);
+    if (volgnummer) remittance = `${remittance}${remittance ? " · " : ""}volgnr ${volgnummer}`;
+
+    entries.push({
+      amount: Math.abs(amountNum),
+      direction: amountNum >= 0 ? "in" : "uit",
+      bookingDate,
+      ref,
+      counterpartyName,
+      counterpartyIban: idx.tegenpartij >= 0 ? (cells[idx.tegenpartij] || "").trim() : "",
+      remittance,
+      volgnummer,
+    });
+  }
+
+  entries.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : a.bookingDate > b.bookingDate ? 1 : 0));
+  return { iban, accountName: null, entries, closingBalance: null, closingBalanceDate: null };
+}
+
 function parseCamt053(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) {
@@ -741,9 +828,12 @@ export default function CashflowPlanner() {
     setBankResult(null);
     try {
       const text = await file.text();
-      const parsed = parseCamt053(text);
+      const isCsv = /\.csv$/i.test(file.name) || (!text.trimStart().startsWith("<") && text.includes(";"));
+      const parsed = isCsv ? parseBankCsv(text) : parseCamt053(text);
       if (!parsed.entries.length) {
-        setBankError("Geen verrichtingen gevonden in dit bestand — is het een geldig CAMT.053-bestand?");
+        setBankError(isCsv
+          ? "Geen geaccepteerde verrichtingen gevonden in deze CSV."
+          : "Geen verrichtingen gevonden in dit bestand — is het een geldig CAMT.053-bestand?");
         setBankParsed(null);
       } else {
         setBankParsed(parsed);
@@ -2397,7 +2487,7 @@ export default function CashflowPlanner() {
             <button
               onClick={openBankModal}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
-              title="CAMT.053 bankuittreksel inlezen en matchen"
+              title="Bankuittreksel inlezen (CAMT.053 XML of CSV-export) en matchen"
             >
               <Landmark className="w-3.5 h-3.5" /> Bank importeren
             </button>
@@ -2821,7 +2911,7 @@ export default function CashflowPlanner() {
               <button onClick={() => setShowBankModal(false)}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              CAMT.053 XML-bestand van je bank. Verrichtingen die matchen met een openstaande post worden als betaald gemarkeerd; alles wat niet matcht wordt automatisch als nieuwe, al-betaalde post aangemaakt.
+              CAMT.053 XML-bestand of CSV-export van je bank. Verrichtingen die matchen met een openstaande post worden als betaald gemarkeerd; alles wat niet matcht wordt automatisch als nieuwe, al-betaalde post aangemaakt.
             </p>
 
             {!bankParsed && !bankResult && (
@@ -2832,7 +2922,7 @@ export default function CashflowPlanner() {
                 >
                   Klik om een .XML-bestand te kiezen
                 </button>
-                <input ref={bankFileInputRef} type="file" accept=".xml,application/xml,text/xml" className="hidden" onChange={handleBankFile} />
+                <input ref={bankFileInputRef} type="file" accept=".xml,application/xml,text/xml,.csv,text/csv" className="hidden" onChange={handleBankFile} />
               </>
             )}
 
