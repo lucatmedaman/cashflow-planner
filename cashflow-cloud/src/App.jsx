@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.55.0";
+const APP_VERSION = "1.57.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -237,6 +237,7 @@ function entityFromRecord(r) {
     pocketsmithAccount: r.fields.PocketSmithRekening || "",
     bankBalance: typeof r.fields.BankSaldo === "number" ? r.fields.BankSaldo : null,
     bankBalanceDate: r.fields.BankSaldoDatum || null,
+    exactOnlineEmail: r.fields.ExactOnlineEmail || "",
     colorIdx: colorIdxFromId(r.id),
   };
 }
@@ -492,6 +493,9 @@ export default function CashflowPlanner() {
   const [ublDraft, setUblDraft] = useState(null); // {entityId, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning, source}
   const [ublSaving, setUblSaving] = useState(false);
   const [ublError, setUblError] = useState("");
+  const [ublFollowUp, setUblFollowUp] = useState(null); // {pdfFile, filename, entity}
+  const [sendingToAccountant, setSendingToAccountant] = useState(false);
+  const [sendResult, setSendResult] = useState(null); // {ok, message}
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
@@ -1724,6 +1728,7 @@ export default function CashflowPlanner() {
     return {
       description: invoiceNumber ? `${firstLine} — factuur ${invoiceNumber}` : firstLine,
       counterparty: firstLine,
+      invoiceNumber,
       amount,
       dueDate: dueDate || invoiceDate || todayISO(),
       invoiceDate,
@@ -1745,6 +1750,7 @@ export default function CashflowPlanner() {
           entityId: activeEntity !== "all" ? activeEntity : "",
           fileName: file.name,
           source: "PDF",
+          pdfFile: file,
           ...parsed,
         });
         setUblError("");
@@ -1790,12 +1796,65 @@ export default function CashflowPlanner() {
       const created = itemFromRecord(rec);
       setItems((prev) => [...prev, created]);
       markSynced();
+
+      if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
+        const entity = entities.find((en) => en.id === ublDraft.entityId);
+        const sanitize = (s) => (s || "").replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 60);
+        const filename = `${sanitize(ublDraft.counterparty) || "Factuur"} - ${ublDraft.dueDate} - ${ublDraft.amount}.pdf`;
+        setUblFollowUp({ pdfFile: ublDraft.pdfFile, filename, entity });
+      }
       setUblDraft(null);
     } catch (err) {
       setAirtableError(err.message);
       setUblError(`Opslaan mislukt: ${err.message}`);
     } finally {
       setUblSaving(false);
+    }
+  }
+
+  function downloadRenamedPdf() {
+    if (!ublFollowUp?.pdfFile) return;
+    const url = URL.createObjectURL(ublFollowUp.pdfFile);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = ublFollowUp.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  async function sendToAccountant() {
+    if (!ublFollowUp?.entity?.exactOnlineEmail || !ublFollowUp?.pdfFile) return;
+    setSendingToAccountant(true);
+    setSendResult(null);
+    try {
+      const pdfBase64 = await fileToBase64(ublFollowUp.pdfFile);
+      const res = await fetch("/api/send-to-accountant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: ublFollowUp.entity.exactOnlineEmail,
+          subject: `Factuur — ${ublFollowUp.filename.replace(/\.pdf$/i, "")}`,
+          text: `Bijgevoegd de factuur "${ublFollowUp.filename}", automatisch doorgestuurd vanuit Cashflow Planner.`,
+          filename: ublFollowUp.filename,
+          pdfBase64,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Versturen mislukt (${res.status})`);
+      setSendResult({ ok: true, message: `Verstuurd naar ${ublFollowUp.entity.exactOnlineEmail}.` });
+    } catch (err) {
+      setSendResult({ ok: false, message: err.message });
+    } finally {
+      setSendingToAccountant(false);
     }
   }
 
@@ -2130,6 +2189,16 @@ export default function CashflowPlanner() {
     if (!entity) return;
     try {
       await atUpdate(TABLES.entities, [{ id, fields: { PocketSmithRekening: entity.pocketsmithAccount || "" } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+  async function commitEntityExactOnlineEmail(id) {
+    const entity = entities.find((e) => e.id === id);
+    if (!entity) return;
+    try {
+      await atUpdate(TABLES.entities, [{ id, fields: { ExactOnlineEmail: entity.exactOnlineEmail || "" } }]);
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -2735,6 +2804,7 @@ export default function CashflowPlanner() {
             onUpdateEntityFieldLocal={updateEntityFieldLocal}
             onCommitEntityIban={commitEntityIban}
             onCommitEntityPocketsmith={commitEntityPocketsmith}
+            onCommitEntityExactOnlineEmail={commitEntityExactOnlineEmail}
             onRemoveEntity={removeEntity}
             lastUpdateByEntity={lastUpdateByEntity}
             firstBankStatementByEntity={firstBankStatementByEntity}
@@ -2969,6 +3039,49 @@ export default function CashflowPlanner() {
                 Annuleer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Na opslaan van een PDF-import: hernoemd bestand downloaden + evt. e-mail naar boekhouding openen */}
+      {ublFollowUp && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-sm w-full p-4 space-y-3">
+            <p className="text-sm font-medium text-slate-800">Post aangemaakt ✓</p>
+            <p className="text-xs text-slate-500">
+              Volgende stap: bewaar de PDF onder een duidelijke naam en stuur 'm door naar de boekhouding.
+            </p>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-mono text-slate-600 break-all">
+              {ublFollowUp.filename}
+            </div>
+            {ublFollowUp.entity?.exactOnlineEmail ? (
+              <button
+                onClick={sendToAccountant}
+                disabled={sendingToAccountant}
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40"
+              >
+                {sendingToAccountant ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {sendingToAccountant ? "Bezig met versturen…" : `Verstuur automatisch naar ${ublFollowUp.entity.name}'s boekhouding`}
+              </button>
+            ) : (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                Geen "ExactOnlineEmail" ingesteld bij {ublFollowUp.entity?.name || "deze boekhouding"} — voeg dat toe in Boekhoudingen om hier automatisch te kunnen versturen.
+              </p>
+            )}
+            {sendResult && (
+              <p className={`text-[11px] rounded-lg px-2.5 py-1.5 border ${sendResult.ok ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-rose-700 bg-rose-50 border-rose-200"}`}>
+                {sendResult.ok ? "✓ " : "⚠ "}{sendResult.message}
+              </p>
+            )}
+            <button
+              onClick={downloadRenamedPdf}
+              className="w-full flex items-center justify-center gap-2 border border-slate-200 rounded-lg py-2 text-sm font-medium text-slate-700"
+            >
+              <Download className="w-4 h-4" /> Download hernoemd (voor je eigen archief)
+            </button>
+            <button onClick={() => { setUblFollowUp(null); setSendResult(null); }} className="w-full text-xs text-slate-400 pt-1">
+              Sluiten
+            </button>
           </div>
         </div>
       )}
@@ -4181,7 +4294,7 @@ function KoppelenView({
 function BoekhoudingenView({
   entities, newEntityName, setNewEntityName, onAddEntity, onMoveEntity,
   onUpdateOpeningBalanceLocal, onCommitOpeningBalance,
-  onUpdateEntityFieldLocal, onCommitEntityIban, onCommitEntityPocketsmith,
+  onUpdateEntityFieldLocal, onCommitEntityIban, onCommitEntityPocketsmith, onCommitEntityExactOnlineEmail,
   onRemoveEntity, lastUpdateByEntity, firstBankStatementByEntity,
 }) {
   return (
@@ -4257,6 +4370,15 @@ function BoekhoudingenView({
                     onChange={(ev) => onUpdateEntityFieldLocal(e.id, "pocketsmithAccount", ev.target.value)}
                     onBlur={() => onCommitEntityPocketsmith(e.id)}
                     placeholder="PocketSmith-rekeningnaam"
+                    className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 pl-5 mt-1">
+                  <input
+                    value={e.exactOnlineEmail || ""}
+                    onChange={(ev) => onUpdateEntityFieldLocal(e.id, "exactOnlineEmail", ev.target.value)}
+                    onBlur={() => onCommitEntityExactOnlineEmail(e.id)}
+                    placeholder="E-mailadres boekhouding (bv. Exact Online)"
                     className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1.5 text-xs outline-none focus:border-slate-400"
                   />
                 </div>
