@@ -99,16 +99,53 @@ function checkBasicAuth(req) {
   return { ok: user === expectedUser && pass === expectedPass, reason: "mismatch" };
 }
 
+// Schrijft een mislukte import als zichtbare "foutpost" in de Posten-tabel,
+// zodat een falende push nooit meer geruisloos verdwijnt (Vercel-logs
+// verlopen; Airtable niet). Lukt zelfs dát niet (bv. dood token), dan rest
+// enkel de HTTP-foutrespons die Billtobox in zijn Gebeurtenissen bewaart.
+async function logFailureToAirtable(step, message, targetEntityId, extra) {
+  try {
+    await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}`, {
+      method: "POST",
+      headers: airtableHeaders(),
+      body: JSON.stringify({
+        records: [{
+          fields: {
+            Omschrijving: `⚠ BILLTOBOX-IMPORT MISLUKT (${step})`,
+            Boekhouding: targetEntityId ? [targetEntityId] : [],
+            Opmerking: `${message}${extra ? ` — ${extra}` : ""}`.slice(0, 1000),
+            Bedrag: 0,
+            Richting: "uit",
+            Datum: new Date().toISOString().slice(0, 10),
+            Herhaling: "once",
+            Bron: "Billtobox",
+            Gelezen: false,
+            BetaaldeData: "[]",
+          },
+        }],
+      }),
+    });
+    return true;
+  } catch (e) {
+    console.error("billtobox-import: kon foutpost niet wegschrijven:", e);
+    return false;
+  }
+}
+
 export default async function handler(req, res) {
   const entityKey = (req.query?.entity || DEFAULT_ENTITY_KEY).toLowerCase();
   const targetEntityId = ENTITY_MAP[entityKey] || ENTITY_MAP[DEFAULT_ENTITY_KEY];
   console.log(`billtobox-import: handler invoked, method=${req.method}, content-type=${req.headers["content-type"]}, entity=${entityKey}`);
+  // Houdt bij welke stap als laatste gestart is, zodat een crash altijd
+  // benoemt wáár het misliep — dat was tot nu toe onzichtbaar.
+  let step = "start";
   try {
     if (req.method !== "POST" && req.method !== "PUT") {
       res.status(405).json({ error: "Alleen POST of PUT wordt ondersteund." });
       return;
     }
 
+    step = "auth";
     const auth = checkBasicAuth(req);
     if (auth.reason === "not_configured") {
       console.error("billtobox-import: BILLTOBOX_USER/BILLTOBOX_PASSWORD ontbreken als env var.");
@@ -122,6 +159,7 @@ export default async function handler(req, res) {
       return;
     }
 
+    step = "body_lezen";
     const rawXml = await readRawBody(req);
     if (!rawXml || typeof rawXml !== "string" || !rawXml.includes("<")) {
       // Likely Billtobox's "Verbinding testen" button, not a real invoice —
@@ -137,6 +175,7 @@ export default async function handler(req, res) {
     // document — dat was dus "UPData", niet het echte factuurnummer.
     const xml = rawXml.replace(/<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/, "");
 
+    step = "velden_extraheren";
     const invoiceNumber = extractTag(xml, "ID") || "(onbekend nummer)";
     const issueDate = extractTag(xml, "IssueDate");
     const dueDate = extractTag(xml, "DueDate") || issueDate || new Date().toISOString().slice(0, 10);
@@ -144,6 +183,7 @@ export default async function handler(req, res) {
     const payableAmountRaw = extractTag(xml, "PayableAmount");
     const amount = payableAmountRaw ? Math.abs(parseFloat(payableAmountRaw)) : 0;
     if (!amount) {
+      await logFailureToAirtable("geen bedrag", `Kon geen bedrag (PayableAmount) uit UBL-factuur ${invoiceNumber} halen.`, targetEntityId, `entity=${entityKey}`);
       res.status(422).json({ error: "Kon geen bedrag (PayableAmount) uit de UBL-factuur halen — niet aangemaakt." });
       return;
     }
@@ -158,8 +198,27 @@ export default async function handler(req, res) {
     const payeeAccountBlock = extractTag(paymentBlock, "PayeeFinancialAccount") || "";
     const iban = extractTag(payeeAccountBlock, "ID") || "";
 
+    // Dedup: dezelfde factuur (zelfde nummer + bedrag) niet twee keer
+    // aanmaken — Billtobox kan een push herhalen, en tot nu toe was er geen
+    // enkele bescherming daartegen (in tegenstelling tot bank-import en
+    // PocketSmith-sync, die al op referentie dedupten).
+    step = "dedup_check";
+    const dedupRef = `btb-${invoiceNumber}-${amount.toFixed(2)}`;
+    const dedupUrl = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}`);
+    dedupUrl.searchParams.set("filterByFormula", `{BankRef} = "${dedupRef}"`);
+    dedupUrl.searchParams.set("maxRecords", "1");
+    const dedupRes = await fetch(dedupUrl.toString(), { headers: airtableHeaders() });
+    const dedupData = await dedupRes.json();
+    if (dedupRes.ok && (dedupData.records || []).length > 0) {
+      console.log(`billtobox-import: factuur ${invoiceNumber} al aanwezig (${dedupRef}), overgeslagen.`);
+      res.status(200).json({ status: "ok", note: "Factuur was al eerder geïmporteerd — geen duplicaat aangemaakt.", invoiceNumber });
+      return;
+    }
+
+    step = "crediteur_aanmaken";
     const counterpartyId = await resolveCounterpartyId(supplierName);
 
+    step = "post_aanmaken";
     const fields = {
       Omschrijving: `${supplierName} — factuur ${invoiceNumber}`,
       Boekhouding: [targetEntityId],
@@ -172,6 +231,7 @@ export default async function handler(req, res) {
       Factuurdatum: issueDate || null,
       Herhaling: "once",
       Bron: "Billtobox",
+      BankRef: dedupRef,
       Gelezen: false,
       BetaaldeData: "[]",
     };
@@ -183,6 +243,7 @@ export default async function handler(req, res) {
     });
     const createData = await createRes.json();
     if (!createRes.ok) {
+      await logFailureToAirtable("Airtable weigerde post", JSON.stringify(createData).slice(0, 800), targetEntityId, `factuur ${invoiceNumber}, ${supplierName}, €${amount}`);
       res.status(502).json({ error: "Airtable weigerde de nieuwe post.", detail: createData });
       return;
     }
@@ -198,6 +259,10 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("billtobox-import crashed:", err);
-    res.status(500).json({ error: `Verwerken van UBL-factuur mislukt: ${err.message}` });
+    const logged = await logFailureToAirtable(`crash bij ${step}`, err.message, targetEntityId, null);
+    res.status(500).json({
+      error: `Verwerken van UBL-factuur mislukt (stap: ${step}): ${err.message}`,
+      loggedToAirtable: logged,
+    });
   }
 }
