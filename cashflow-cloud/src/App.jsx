@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.6";
+const APP_VERSION = "1.60.7";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -892,7 +892,6 @@ export default function CashflowPlanner() {
     // collide with each other before React state catches up.
     let workingItems = items;
     let workingPayments = payments;
-    let workingCounterparties = counterparties;
 
     // Cross-bron-dedup: PocketSmith-betalingen dragen "ps-<id>" als
     // referentie, terwijl CAMT/CSV de échte bankreferentie hebben — dezelfde
@@ -957,25 +956,16 @@ export default function CashflowPlanner() {
         }
 
         // Crediteur/debiteur vooraf bepalen, zodat de Betaling meteen bij
-        // aanmaak al gekoppeld is — niet pas achteraf, en niet enkel voor
-        // het document zoals voorheen. Bij een match op een bestaand
-        // document nemen we diens crediteur over (geen nieuwe aanmaken);
-        // anders wordt de banknaam zoals gebruikelijk herkend/aangemaakt.
+        // aanmaak al gekoppeld is. Bij een match op een bestaand document
+        // nemen we diens crediteur over; anders gaat de banknaam door
+        // resolveCounterpartyId, dat ook de naammappings toepast (de
+        // vroegere aparte exacte-naam-lookup hier omzeilde die mappings en
+        // diende enkel nog het afgeschafte vertrouwd-mechanisme).
         let counterpartyId = null;
         if (matchedItem?.counterpartyId) {
           counterpartyId = matchedItem.counterpartyId;
         } else if (entry.counterpartyName) {
-          const existing = workingCounterparties.find(
-            (c) => c.name.toLowerCase() === entry.counterpartyName.toLowerCase()
-          );
-          if (existing) {
-            counterpartyId = existing.id;
-          } else {
-            // Gloednieuwe crediteur/debiteur — kan per definitie nog niet
-            // vertrouwd zijn (AutomatischDocumentAanmaken staat nooit aan
-            // bij aanmaak).
-            counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
-          }
+          counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
         }
 
         const snapshot = { ...entry, wasCreated: !matchedItem };
@@ -1049,7 +1039,6 @@ export default function CashflowPlanner() {
 
     setItems(workingItems);
     setPayments(workingPayments);
-    setCounterparties(workingCounterparties);
     markSynced();
     setBankResult({ matched, created, proposed, skipped, errors, errorDetails, volgnummersAangevuld, total: bankParsed.entries.length });
     setBankImporting(false);
@@ -1972,8 +1961,20 @@ export default function CashflowPlanner() {
   }
 
   async function resolveCounterpartyId(rawName) {
-    const trimmed = (rawName || "").trim();
+    let trimmed = (rawName || "").trim();
     if (!trimmed) return null;
+    // Naammappings hier al toepassen — vóór het zoeken/aanmaken — zodat een
+    // bankvariant als "Mr. Franklin" meteen bij de bestaande "Mr Franklin"
+    // uitkomt, in plaats van eerst een duplicaat-crediteur te worden die je
+    // achteraf via "Toepassen" moet samenvoegen. Zelfde mapping-logica als
+    // de Toepassen-knop en de PocketSmith-sync; eerste treffer wint.
+    for (const m of nameMappings) {
+      const match = matchNamePattern(trimmed, m);
+      if (match && m.correctName) {
+        trimmed = resolveMappedName(m, match.captured).trim();
+        break;
+      }
+    }
     const existing = counterpartiesRef.current.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
     if (existing) return existing.id;
     const [rec] = await atCreate(TABLES.counterparties, [{ fields: { Naam: trimmed } }]);
