@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.5";
+const APP_VERSION = "1.60.6";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -1183,13 +1183,25 @@ export default function CashflowPlanner() {
   async function linkPaymentToDocument(payment, doc) {
     try {
       const entryDate = fromISO(payment.date);
-      const windowStart = toISO(addDays(entryDate, -10));
-      const windowEnd = toISO(addDays(entryDate, 10));
+      // Bewust veel ruimer venster dan de ±10 dagen van de automatische
+      // bank-matching: dit is een handmatige koppeling, de gebruiker heeft
+      // al beslist dát deze betaling bij dit document hoort — we zoeken
+      // enkel nog wélke vervaldag ze dekt. Voorheen viel de code buiten
+      // ±10 dagen terug op de betaaldatum zelf als "betaalde datum", maar
+      // die is nooit een vervaldag-occurrence, waardoor de post ondanks de
+      // koppeling onbetaald bleef ogen in Planning.
+      const windowStart = toISO(addDays(entryDate, -90));
+      const windowEnd = toISO(addDays(entryDate, 90));
       const occ = generateOccurrences(doc, windowStart, windowEnd)
         .filter((o) => !(doc.paidDates || []).includes(o.date));
-      const matchDate = occ.length > 0
-        ? occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate))[0].date
-        : payment.date;
+      let matchDate;
+      if (occ.length > 0) {
+        matchDate = occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate))[0].date;
+      } else if (!(doc.paidDates || []).includes(doc.dueDate)) {
+        matchDate = doc.dueDate;
+      } else {
+        matchDate = payment.date;
+      }
       const newPaidDates = [...(doc.paidDates || []), matchDate];
       const newDocPaymentIds = [...(doc.paymentIds || []), payment.id];
       const newPaymentDocIds = [...(payment.documentIds || []), doc.id];
