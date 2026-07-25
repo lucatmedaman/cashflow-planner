@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.58.1";
+const APP_VERSION = "1.59.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -885,7 +885,7 @@ export default function CashflowPlanner() {
     if (!bankParsed || !bankEntityId) return;
     setBankImporting(true);
     setBankError("");
-    let matched = 0, created = 0, proposed = 0, skipped = 0, errors = 0;
+    let matched = 0, created = 0, proposed = 0, skipped = 0, errors = 0, volgnummersAangevuld = 0;
 
     // Work off local snapshots so matches within this same import don't
     // collide with each other before React state catches up.
@@ -895,8 +895,21 @@ export default function CashflowPlanner() {
 
     for (const entry of bankParsed.entries) {
       try {
-        const alreadyImported = entry.ref && workingPayments.some((p) => p.bankRef === entry.ref);
-        if (alreadyImported) { skipped++; continue; }
+        const existingPayment = entry.ref ? workingPayments.find((p) => p.bankRef === entry.ref) : null;
+        if (existingPayment) {
+          // Al eerder geïmporteerd (bv. via CAMT). Enige wat we alsnog doen:
+          // een ontbrekend volgnummer aanvullen als deze bron (CSV) er wél
+          // een heeft — nooit een bestaand volgnummer overschrijven.
+          if (entry.volgnummer && !existingPayment.volgnummer) {
+            await atUpdate(TABLES.payments, [{ id: existingPayment.id, fields: { Volgnummer: entry.volgnummer } }]);
+            workingPayments = workingPayments.map((p) =>
+              p.id === existingPayment.id ? { ...p, volgnummer: entry.volgnummer } : p
+            );
+            volgnummersAangevuld++;
+          }
+          skipped++;
+          continue;
+        }
 
         const candidates = workingItems.filter(
           (i) => i.entityId === bankEntityId && i.direction === entry.direction &&
@@ -1042,7 +1055,7 @@ export default function CashflowPlanner() {
     setPayments(workingPayments);
     setCounterparties(workingCounterparties);
     markSynced();
-    setBankResult({ matched, created, proposed, skipped, errors, total: bankParsed.entries.length });
+    setBankResult({ matched, created, proposed, skipped, errors, volgnummersAangevuld, total: bankParsed.entries.length });
     setBankImporting(false);
   }
 
@@ -2988,6 +3001,7 @@ export default function CashflowPlanner() {
                   <p>{bankResult.created} document automatisch aangemaakt (vertrouwde crediteur)</p>
                   {bankResult.proposed > 0 && <p>{bankResult.proposed} betaling(en) wachten in "Koppelen" — geen match, geen vertrouwde crediteur</p>}
                   {bankResult.skipped > 0 && <p>{bankResult.skipped} overgeslagen (al eerder geïmporteerd)</p>}
+                  {bankResult.volgnummersAangevuld > 0 && <p>{bankResult.volgnummersAangevuld} volgnummer(s) aangevuld op bestaande betalingen</p>}
                   {bankResult.errors > 0 && <p className="text-rose-600">{bankResult.errors} mislukt</p>}
                 </div>
                 <button onClick={() => setShowBankModal(false)} className="w-full py-2 rounded-lg border border-slate-200 text-sm">
@@ -5016,9 +5030,10 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               <div>
                 <p className="text-sm font-medium text-slate-800">{counterparty.name}</p>
                 <p className="text-[11px] text-slate-400">
-                  {cpItems.length > 0
-                    ? `${cpItems.length} post${cpItems.length !== 1 ? "en" : ""}`
-                    : `${cpPayments.length} betaling${cpPayments.length !== 1 ? "en" : ""}, geen post`}
+                  {cpItems.length > 0 && `${cpItems.length} post${cpItems.length !== 1 ? "en" : ""}`}
+                  {cpItems.length > 0 && cpPayments.length > 0 && " · "}
+                  {cpPayments.length > 0 && `${cpPayments.length} betaling${cpPayments.length !== 1 ? "en" : ""}`}
+                  {cpItems.length === 0 && cpPayments.length > 0 && ", geen post"}
                 </p>
               </div>
               <div className="flex items-center gap-3">
@@ -5162,7 +5177,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     </label>
                   </div>
                 )}
-                {cpItems.length > 0 ? (
+                {cpItems.length > 0 && (
                 <div className="divide-y divide-slate-50">
                 {cpItems
                   .slice()
@@ -5426,8 +5441,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     );
                   })}
                 </div>
-                ) : (
+                )}
+                {cpPayments.length > 0 && (
                   <div className="divide-y divide-slate-50">
+                    {cpItems.length > 0 && (
+                      <p className="px-3.5 pt-2.5 pb-1 text-[11px] font-medium text-slate-500 bg-slate-50/60 border-t border-slate-100">
+                        Betalingen ({cpPayments.length})
+                      </p>
+                    )}
                     {cpPayments
                       .slice()
                       .sort((a, b) => (a.date < b.date ? 1 : -1))
@@ -5462,9 +5483,11 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           </div>
                         );
                       })}
-                    <p className="px-3.5 py-2 text-[11px] text-slate-400">
-                      Nog geen post voor deze debiteur/crediteur — enkel betaling(en) hierboven. Klik op een betaling voor details of om ze aan een document te koppelen.
-                    </p>
+                    {cpItems.length === 0 && (
+                      <p className="px-3.5 py-2 text-[11px] text-slate-400">
+                        Nog geen post voor deze debiteur/crediteur — enkel betaling(en) hierboven. Klik op een betaling voor details of om ze aan een document te koppelen.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
