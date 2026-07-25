@@ -287,12 +287,11 @@ export default async function handler(req, res) {
 
         // Crediteur/debiteur vooraf bepalen — zelfde volgorde als de
         // handmatige CAMT.053-import: bij een match op een bestaand document
-        // wordt diens crediteur overgenomen (geen nieuwe aangemaakt), anders
-        // wordt de (opgeschoonde) banknaam herkend of aangemaakt. Dit
-        // gebeurt nu ongeacht of de crediteur "vertrouwd" is — vertrouwen
-        // bepaalt enkel of er ook automatisch een document aangemaakt wordt.
+        // Crediteur/debiteur vooraf bepalen: bij een match op een bestaand
+        // document wordt diens crediteur overgenomen (geen nieuwe
+        // aangemaakt), anders wordt de (opgeschoonde) banknaam herkend of
+        // aangemaakt.
         let counterpartyId = null;
-        let trustedCounterparty = false;
         const targetCounterpartyId = target ? (target.fields.DebiteurCrediteur || [])[0] : null;
         if (targetCounterpartyId) {
           counterpartyId = targetCounterpartyId;
@@ -300,7 +299,6 @@ export default async function handler(req, res) {
           const existing = counterparties.find((c) => (c.fields.Naam || "").toLowerCase() === payee.toLowerCase());
           if (existing) {
             counterpartyId = existing.id;
-            trustedCounterparty = !!existing.fields.AutomatischDocumentAanmaken;
           } else {
             counterpartyId = await resolveCounterpartyId(payee, counterparties);
           }
@@ -314,6 +312,11 @@ export default async function handler(req, res) {
           Boekhouding: [entity.id],
           Bron: "PocketSmith",
           Bankreferentie: ref,
+          // PocketSmith geeft het bank-volgnummer (indien de bankfeed het
+          // meelevert) door via cheque_number — zelfde veld als waar de
+          // CSV-import het volgnummer in bewaart. Vaak leeg; dan vult een
+          // latere CSV-herimport het alsnog aan (zie app v1.58.2).
+          Volgnummer: tx.cheque_number ? String(tx.cheque_number) : "",
           RuweBrongegevens: JSON.stringify(snapshot),
           DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
           GekoppeldeDocumenten: target ? [target.id] : [],
@@ -333,31 +336,13 @@ export default async function handler(req, res) {
           });
           matched++;
         } else {
-          if (trustedCounterparty) {
-            const docRec = await atCreate(TABLES.items, {
-              Omschrijving: payee.slice(0, 80),
-              Boekhouding: [entity.id],
-              DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
-              Opmerking: rawPayee,
-              Bedrag: amount,
-              Richting: direction,
-              Datum: date,
-              Betaaldatum: date,
-              Herhaling: "once",
-              Bron: "Bank-import",
-              Gelezen: false,
-              BankRef: ref,
-              BankSnapshot: JSON.stringify(snapshot),
-              BetaaldeData: JSON.stringify([date]),
-            });
-            await atUpdate(TABLES.payments, paymentRec.id, { GekoppeldeDocumenten: [docRec.id] });
-            created++;
-          } else {
-            // Geen match, geen vertrouwde crediteur: betaling blijft
-            // ongekoppeld — te bevestigen/koppelen in het Koppelen-scherm.
-            // (De crediteur zelf staat intussen wél al op de betaling.)
-            proposed++;
-          }
+          // Geen match met een bestaande post: de betaling blijft
+          // ongekoppeld en wacht in het Koppelen-scherm. Er wordt bewust
+          // GEEN automatische "al-betaalde" post meer aangemaakt — ook niet
+          // voor vertrouwde crediteuren (zelfde gedragswijziging als de
+          // bank-import in de app v1.60.0; de vertrouwd-vlag blijft enkel
+          // nog relevant voor factuurstromen zoals Billtobox).
+          proposed++;
         }
       } catch (err) {
         errors++;
