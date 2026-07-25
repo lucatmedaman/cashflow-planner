@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.3";
+const APP_VERSION = "1.60.4";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -5901,7 +5901,16 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
   const scoped = payments.filter((p) => filteredEntityIds.includes(p.entityId));
   const filtered = scoped
     .filter((p) => statusFilter === "all" || statusOf(p) === statusFilter)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => {
+      // Volgnummer aflopend; betalingen zonder volgnummer (PocketSmith,
+      // CAMT zonder CSV-aanvulling) komen daarna, onderling op datum
+      // aflopend. String-vergelijking volstaat: volgnummers binnen één
+      // rekening delen hetzelfde formaat ("2026-00452").
+      if (a.volgnummer && b.volgnummer) return a.volgnummer < b.volgnummer ? 1 : a.volgnummer > b.volgnummer ? -1 : 0;
+      if (a.volgnummer) return -1;
+      if (b.volgnummer) return 1;
+      return a.date < b.date ? 1 : -1;
+    });
 
   const counts = {
     all: scoped.length,
