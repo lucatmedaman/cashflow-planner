@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.2";
+const APP_VERSION = "1.60.3";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -886,6 +886,7 @@ export default function CashflowPlanner() {
     setBankImporting(true);
     setBankError("");
     let matched = 0, created = 0, proposed = 0, skipped = 0, errors = 0, volgnummersAangevuld = 0;
+    const errorDetails = [];
 
     // Work off local snapshots so matches within this same import don't
     // collide with each other before React state catches up.
@@ -1022,6 +1023,7 @@ export default function CashflowPlanner() {
         }
       } catch (err) {
         errors++;
+        errorDetails.push(`${entry.bookingDate} · ${(entry.counterpartyName || entry.remittance || "?").slice(0, 40)} · ${eur(entry.amount)}: ${err.message}`);
       }
     }
 
@@ -1049,7 +1051,7 @@ export default function CashflowPlanner() {
     setPayments(workingPayments);
     setCounterparties(workingCounterparties);
     markSynced();
-    setBankResult({ matched, created, proposed, skipped, errors, volgnummersAangevuld, total: bankParsed.entries.length });
+    setBankResult({ matched, created, proposed, skipped, errors, errorDetails, volgnummersAangevuld, total: bankParsed.entries.length });
     setBankImporting(false);
   }
 
@@ -2992,10 +2994,17 @@ export default function CashflowPlanner() {
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">
                   <p className="font-medium mb-1">Import voltooid</p>
                   <p>{bankResult.matched} gekoppeld aan bestaand document</p>
-                  {bankResult.proposed > 0 && <p>{bankResult.proposed} betaling(en) wachten in "Koppelen" — geen match, geen vertrouwde crediteur</p>}
+                  {bankResult.proposed > 0 && <p>{bankResult.proposed} betaling(en) wachten in "Koppelen" — geen match met een bestaande post</p>}
                   {bankResult.skipped > 0 && <p>{bankResult.skipped} overgeslagen (al eerder geïmporteerd)</p>}
                   {bankResult.volgnummersAangevuld > 0 && <p>{bankResult.volgnummersAangevuld} volgnummer(s) aangevuld op bestaande betalingen</p>}
-                  {bankResult.errors > 0 && <p className="text-rose-600">{bankResult.errors} mislukt</p>}
+                  {bankResult.errors > 0 && (
+                    <div className="text-rose-600">
+                      <p>{bankResult.errors} mislukt:</p>
+                      {(bankResult.errorDetails || []).map((d, i) => (
+                        <p key={i} className="text-[11px] pl-2">• {d}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button onClick={() => setShowBankModal(false)} className="w-full py-2 rounded-lg border border-slate-200 text-sm">
                   Sluiten
