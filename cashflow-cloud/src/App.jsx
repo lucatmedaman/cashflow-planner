@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.7";
+const APP_VERSION = "1.60.8";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -5913,7 +5913,7 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
 
   const scoped = payments.filter((p) => filteredEntityIds.includes(p.entityId));
   const filtered = scoped
-    .filter((p) => statusFilter === "all" || statusOf(p) === statusFilter)
+    .filter((p) => statusFilter === "all" || (statusFilter === "nocp" ? !p.counterpartyId : statusOf(p) === statusFilter))
     .sort((a, b) => {
       // Datum aflopend als hoofdsleutel, zodat rijen zonder volgnummer
       // (PocketSmith e.d.) op hun eigen datum blijven staan i.p.v.
@@ -5931,6 +5931,7 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
     linked: scoped.filter((p) => statusOf(p) === "linked").length,
     unlinked: scoped.filter((p) => statusOf(p) === "unlinked").length,
     nodoc: scoped.filter((p) => statusOf(p) === "nodoc").length,
+    nocp: scoped.filter((p) => !p.counterpartyId).length,
   };
   const totalIn = filtered.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
   const totalUit = filtered.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
@@ -5940,6 +5941,7 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
     { key: "linked", label: "Gekoppeld" },
     { key: "unlinked", label: "Ongekoppeld" },
     { key: "nodoc", label: "Geen document nodig" },
+    { key: "nocp", label: "Zonder crediteur" },
   ];
 
   return (
