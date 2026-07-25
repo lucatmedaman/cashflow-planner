@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.8";
+const APP_VERSION = "1.61.0";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -3096,15 +3096,12 @@ export default function CashflowPlanner() {
             </div>
             <div>
               <label className="text-[11px] text-slate-400">Debiteur/crediteur</label>
-              <input
+              <CounterpartyAutocomplete
                 value={ublDraft.counterparty}
-                onChange={(e) => setUblDraft({ ...ublDraft, counterparty: e.target.value })}
-                list="ubl-counterparty-suggestions"
-                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                onChange={(v) => setUblDraft({ ...ublDraft, counterparty: v })}
+                counterparties={counterparties}
+                inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
               />
-              <datalist id="ubl-counterparty-suggestions">
-                {counterparties.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.name} />)}
-              </datalist>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -3433,6 +3430,63 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
   );
 }
 
+// Vervangt native <datalist>-suggesties (onbetrouwbaar in Safari op
+// iPad/iOS, zeker binnen een modal) door een zelf getekende, zelf
+// aangestuurde dropdown. Werkt overal identiek, ongeacht browser.
+function CounterpartyAutocomplete({ value, onChange, counterparties, placeholder, className, inputClassName, onKeyDown }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
+  }, []);
+
+  const query = (value || "").trim().toLowerCase();
+  const suggestions = (query
+    ? counterparties.filter((c) => c.name.toLowerCase().includes(query))
+    : counterparties
+  )
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 50);
+
+  return (
+    <div ref={wrapRef} className={`relative ${className || ""}`}>
+      <input
+        value={value || ""}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        className={inputClassName || "w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"}
+      />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+          {suggestions.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(c.name); setOpen(false); }}
+              className="w-full text-left px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel, editing }) {
   return (
     <form onSubmit={onSubmit} className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5">
@@ -3449,16 +3503,13 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
         required
       />
 
-      <input
+      <CounterpartyAutocomplete
         value={form.counterparty}
-        onChange={(e) => setForm({ ...form, counterparty: e.target.value })}
+        onChange={(v) => setForm({ ...form, counterparty: v })}
+        counterparties={counterparties}
         placeholder="Debiteur / crediteur (optioneel, bv. Elektriciteitsleverancier X)"
-        list="counterparty-suggestions"
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
+        inputClassName="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
       />
-      <datalist id="counterparty-suggestions">
-        {counterparties.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.name} />)}
-      </datalist>
 
       {(() => {
         const matchedCp = counterparties.find(
@@ -4040,16 +4091,12 @@ function KoppelenView({
               placeholder="Omschrijving"
               className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
             />
-            <input
+            <CounterpartyAutocomplete
               value={newPayment.counterparty}
-              onChange={(e) => setNewPayment({ ...newPayment, counterparty: e.target.value })}
+              onChange={(v) => setNewPayment({ ...newPayment, counterparty: v })}
+              counterparties={counterparties || []}
               placeholder="Debiteur / crediteur (optioneel)"
-              list="koppelen-counterparty-suggestions"
-              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
             />
-            <datalist id="koppelen-counterparty-suggestions">
-              {(counterparties || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.name} />)}
-            </datalist>
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="date"
@@ -5765,17 +5812,15 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
-                    <input
+                    <CounterpartyAutocomplete
                       value={counterpartyInput}
-                      onChange={(e) => setCounterpartyInput(e.target.value)}
+                      onChange={setCounterpartyInput}
                       onKeyDown={(e) => e.key === "Enter" && saveCounterparty()}
+                      counterparties={counterparties || []}
                       placeholder="Naam invullen…"
-                      list="detail-counterparty-suggestions"
-                      className="flex-1 min-w-0 border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400 text-right"
+                      className="flex-1 min-w-0"
+                      inputClassName="w-full border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400 text-right"
                     />
-                    <datalist id="detail-counterparty-suggestions">
-                      {(counterparties || []).slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.name} />)}
-                    </datalist>
                     <button
                       onClick={saveCounterparty}
                       disabled={!counterpartyInput.trim() || savingCounterparty}
