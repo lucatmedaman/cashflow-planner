@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.59.0";
+const APP_VERSION = "1.60.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -893,13 +893,37 @@ export default function CashflowPlanner() {
     let workingPayments = payments;
     let workingCounterparties = counterparties;
 
+    // Cross-bron-dedup: PocketSmith-betalingen dragen "ps-<id>" als
+    // referentie, terwijl CAMT/CSV de échte bankreferentie hebben — dezelfde
+    // verrichting matcht dus nooit op referentie alleen. Tweede sleutel:
+    // boekhouding + datum + bedrag + richting, uitsluitend tegen
+    // PocketSmith-betalingen (om vals-positieven te beperken), en elke
+    // bestaande betaling is maar één keer "claimbaar" zodat twee echte
+    // verrichtingen met hetzelfde bedrag op dezelfde dag niet allebei tegen
+    // dezelfde PocketSmith-betaling wegvallen.
+    const crossClaimed = new Set();
+
     for (const entry of bankParsed.entries) {
       try {
-        const existingPayment = entry.ref ? workingPayments.find((p) => p.bankRef === entry.ref) : null;
+        let existingPayment = entry.ref ? workingPayments.find((p) => p.bankRef === entry.ref) : null;
+        if (!existingPayment) {
+          existingPayment = workingPayments.find(
+            (p) =>
+              !crossClaimed.has(p.id) &&
+              p.source === "PocketSmith" &&
+              p.entityId === bankEntityId &&
+              p.date === entry.bookingDate &&
+              p.direction === entry.direction &&
+              Math.abs(p.amount - entry.amount) < 0.01
+          ) || null;
+          if (existingPayment) crossClaimed.add(existingPayment.id);
+        }
         if (existingPayment) {
-          // Al eerder geïmporteerd (bv. via CAMT). Enige wat we alsnog doen:
-          // een ontbrekend volgnummer aanvullen als deze bron (CSV) er wél
-          // een heeft — nooit een bestaand volgnummer overschrijven.
+          // Al eerder geïmporteerd (via CAMT, CSV of PocketSmith). Enige wat
+          // we alsnog doen: een ontbrekend volgnummer aanvullen als deze
+          // bron er wél een heeft — nooit een bestaand volgnummer of de
+          // bankreferentie overschrijven (de "ps-"-referentie blijft nodig
+          // voor de PocketSmith-dedup zelf).
           if (entry.volgnummer && !existingPayment.volgnummer) {
             await atUpdate(TABLES.payments, [{ id: existingPayment.id, fields: { Volgnummer: entry.volgnummer } }]);
             workingPayments = workingPayments.map((p) =>
@@ -937,7 +961,6 @@ export default function CashflowPlanner() {
         // document nemen we diens crediteur over (geen nieuwe aanmaken);
         // anders wordt de banknaam zoals gebruikelijk herkend/aangemaakt.
         let counterpartyId = null;
-        let trustedCounterparty = false;
         if (matchedItem?.counterpartyId) {
           counterpartyId = matchedItem.counterpartyId;
         } else if (entry.counterpartyName) {
@@ -946,7 +969,6 @@ export default function CashflowPlanner() {
           );
           if (existing) {
             counterpartyId = existing.id;
-            trustedCounterparty = existing.autoCreateDoc;
           } else {
             // Gloednieuwe crediteur/debiteur — kan per definitie nog niet
             // vertrouwd zijn (AutomatischDocumentAanmaken staat nooit aan
@@ -990,41 +1012,13 @@ export default function CashflowPlanner() {
           );
           matched++;
         } else {
-          if (trustedCounterparty) {
-            // Vertrouwde crediteur/debiteur: meteen automatisch een document
-            // aanmaken en koppelen, geen bevestiging nodig.
-            const docFields = itemToFields({
-              description: entry.counterpartyName || (entry.remittance || "Bankverrichting").slice(0, 80),
-              entityId: bankEntityId,
-              counterpartyId,
-              accountNumber: entry.counterpartyIban || "",
-              note: [...new Set([entry.counterpartyName, entry.remittance].filter(Boolean))].join(" — "),
-              amount: entry.amount,
-              direction: entry.direction,
-              dueDate: entry.bookingDate,
-              payDate: entry.bookingDate,
-              recurrence: "once",
-              endDate: null,
-              viaPaypal: false,
-              source: "Bank-import",
-              bankRef: entry.ref,
-              bankSnapshot: JSON.stringify(snapshot),
-              read: false,
-              paidDates: [entry.bookingDate],
-            });
-            const [docRec] = await atCreate(TABLES.items, [{ fields: docFields }]);
-            const createdDoc = itemFromRecord(docRec);
-            workingItems = [...workingItems, createdDoc];
-
-            const linkedDocIds = [createdDoc.id];
-            await atUpdate(TABLES.payments, [{ id: newPayment.id, fields: { GekoppeldeDocumenten: linkedDocIds } }]);
-            workingPayments = workingPayments.map((p) => (p.id === newPayment.id ? { ...p, documentIds: linkedDocIds } : p));
-            created++;
-          } else {
-            // Geen match, geen vertrouwde crediteur: betaling blijft
-            // ongekoppeld — te bevestigen/koppelen in het Koppelen-scherm.
-            proposed++;
-          }
+          // Geen match met een bestaande post: de betaling blijft
+          // ongekoppeld en wacht in het Koppelen-scherm. Er wordt bewust
+          // GEEN automatische "al-betaalde" post meer aangemaakt — ook niet
+          // voor vertrouwde crediteuren (dat gedrag is op vraag van de
+          // gebruiker verwijderd; de vertrouwd-vlag blijft enkel nog
+          // relevant voor factuurstromen zoals Billtobox/PocketSmith).
+          proposed++;
         }
       } catch (err) {
         errors++;
@@ -2926,7 +2920,7 @@ export default function CashflowPlanner() {
               <button onClick={() => setShowBankModal(false)}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <p className="text-xs text-slate-500 mb-3">
-              CAMT.053 XML-bestand of CSV-export van je bank. Verrichtingen die matchen met een openstaande post worden als betaald gemarkeerd; alles wat niet matcht wordt automatisch als nieuwe, al-betaalde post aangemaakt.
+              CAMT.053 XML-bestand of CSV-export van je bank. Verrichtingen die matchen met een openstaande post worden als betaald gemarkeerd; alles wat niet matcht komt als ongekoppelde betaling in het Koppelen-scherm terecht — er worden geen posten automatisch aangemaakt.
             </p>
 
             {!bankParsed && !bankResult && (
@@ -2998,7 +2992,6 @@ export default function CashflowPlanner() {
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">
                   <p className="font-medium mb-1">Import voltooid</p>
                   <p>{bankResult.matched} gekoppeld aan bestaand document</p>
-                  <p>{bankResult.created} document automatisch aangemaakt (vertrouwde crediteur)</p>
                   {bankResult.proposed > 0 && <p>{bankResult.proposed} betaling(en) wachten in "Koppelen" — geen match, geen vertrouwde crediteur</p>}
                   {bankResult.skipped > 0 && <p>{bankResult.skipped} overgeslagen (al eerder geïmporteerd)</p>}
                   {bankResult.volgnummersAangevuld > 0 && <p>{bankResult.volgnummersAangevuld} volgnummer(s) aangevuld op bestaande betalingen</p>}
