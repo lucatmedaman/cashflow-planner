@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.58.0";
+const APP_VERSION = "1.58.1";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -280,6 +280,7 @@ function paymentFromRecord(r) {
     entityId: r.fields.Boekhouding?.[0] || null,
     source: r.fields.Bron || "Cash-handmatig",
     bankRef: r.fields.Bankreferentie || "",
+    volgnummer: r.fields.Volgnummer || "",
     raw,
     categoryId: r.fields.Categorie?.[0] || null,
     projectId: r.fields.Project?.[0] || null,
@@ -297,6 +298,7 @@ function paymentToFields(payment) {
     Boekhouding: payment.entityId ? [payment.entityId] : [],
     Bron: payment.source || "Cash-handmatig",
     Bankreferentie: payment.bankRef || "",
+    Volgnummer: payment.volgnummer || "",
     RuweBrongegevens: payment.raw ? JSON.stringify(payment.raw) : "",
     Categorie: payment.categoryId ? [payment.categoryId] : [],
     Project: payment.projectId ? [payment.projectId] : [],
@@ -460,7 +462,6 @@ function parseBankCsv(csvText) {
     const counterpartyName = idx.naam >= 0 ? (cells[idx.naam] || "").trim() : "";
     let remittance = idx.mededeling >= 0 ? (cells[idx.mededeling] || "").trim() : "";
     if (!remittance) remittance = details.slice(0, 200);
-    if (volgnummer) remittance = `${remittance}${remittance ? " · " : ""}volgnr ${volgnummer}`;
 
     entries.push({
       amount: Math.abs(amountNum),
@@ -950,6 +951,7 @@ export default function CashflowPlanner() {
           entityId: bankEntityId,
           source: "Bank-import",
           bankRef: entry.ref,
+          volgnummer: entry.volgnummer || "",
           raw: snapshot,
           categoryId: null,
           projectId: null,
@@ -5768,6 +5770,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           )}
           <Row label="Bron" value={record.source} />
           <Row label={type === "item" ? "BankRef" : "Bankreferentie"} value={record.bankRef} />
+          {type === "payment" && <Row label="Volgnummer" value={record.volgnummer} />}
           <Row label="Categorie" value={category?.name} />
           <Row label="Project" value={project?.name} />
           {type === "payment" && <Row label="Geen document nodig" value={record.noDocumentNeeded ? "Ja" : null} />}
@@ -5961,6 +5964,7 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
                     {entity?.name} · {p.date} · {p.source}
+                    {p.volgnummer && <> · volgnr <span className="font-mono">{p.volgnummer}</span></>}
                     {category && <> · {category.name}</>}
                     {project && <> · {project.name}</>}
                   </p>
