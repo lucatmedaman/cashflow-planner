@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.60.1";
+const APP_VERSION = "1.60.2";
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -2944,7 +2944,7 @@ export default function CashflowPlanner() {
             {bankParsed && !bankResult && (
               <div className="mt-1 space-y-3">
                 <div className="bg-slate-50 rounded-lg p-3 text-sm">
-                  <p className="text-slate-700 font-medium">{bankParsed.accountName || "Onbekende rekening"}</p>
+                  <p className="text-slate-700 font-medium">{bankParsed.accountName || findEntityByIban(sortedEntities, bankParsed.iban)?.name || "Onbekende rekening"}</p>
                   <p className="text-xs text-slate-400 font-mono">{bankParsed.iban || "geen IBAN gevonden"}</p>
                   <p className="text-xs text-slate-500 mt-1">{bankParsed.entries.length} verrichting{bankParsed.entries.length !== 1 ? "en" : ""} gevonden</p>
                 </div>
