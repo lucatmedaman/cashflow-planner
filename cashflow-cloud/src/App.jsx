@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.63.0";
+const APP_VERSION = "1.63.1";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -3498,6 +3498,8 @@ export default function CashflowPlanner() {
           onCounterpartyClick={goToCounterparty}
           onUpdateItemField={updateItemQuickField}
           onUpdatePaymentField={updatePaymentQuickField}
+          onToggleNoDocNeeded={toggleNoDocumentNeeded}
+          onCreateDocFromPayment={createDocumentFromPayment}
         />
       )}
 
@@ -5989,7 +5991,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onCreateDocFromPayment }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -6009,6 +6011,9 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
   const project = record.projectId ? (projects || []).find((p) => p.id === record.projectId) : null;
   const [counterpartyInput, setCounterpartyInput] = useState("");
   const [savingCounterparty, setSavingCounterparty] = useState(false);
+  const [showCreateDoc, setShowCreateDoc] = useState(false);
+  const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
+  const [creatingDoc, setCreatingDoc] = useState(false);
   const currentCounterparty = record.counterpartyId ? counterpartyById[record.counterpartyId] : null;
 
   async function saveCounterparty() {
@@ -6237,6 +6242,76 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {type === "payment" && (record.documentIds || []).length === 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            {record.noDocumentNeeded ? (
+              <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-2">
+                <span className="text-xs text-slate-500">Gemarkeerd als "geen document nodig"</span>
+                <button
+                  onClick={() => onToggleNoDocNeeded(record)}
+                  className="text-[10px] text-slate-500 underline decoration-dotted shrink-0 ml-2"
+                >
+                  ongedaan maken
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setShowCreateDoc((s) => !s); setDocDraft({ description: record.description, counterpartyName: currentCounterparty?.name || "" }); }}
+                    className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-700"
+                  >
+                    Maak document
+                  </button>
+                  <button
+                    onClick={() => onToggleNoDocNeeded(record)}
+                    className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-500"
+                  >
+                    Geen document nodig
+                  </button>
+                </div>
+                {showCreateDoc && (
+                  <div className="mt-2 space-y-2">
+                    <input
+                      value={docDraft.description}
+                      onChange={(e) => setDocDraft({ ...docDraft, description: e.target.value })}
+                      placeholder="Omschrijving document"
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                    />
+                    <CounterpartyAutocomplete
+                      value={docDraft.counterpartyName}
+                      onChange={(v) => setDocDraft({ ...docDraft, counterpartyName: v })}
+                      counterparties={counterparties || []}
+                      placeholder="Crediteur/debiteur (optioneel — bestaande naam of nieuw)"
+                      inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          setCreatingDoc(true);
+                          const counterpartyId = docDraft.counterpartyName.trim()
+                            ? await onResolveCounterparty(docDraft.counterpartyName.trim())
+                            : null;
+                          await onCreateDocFromPayment(record, { description: docDraft.description, counterpartyId });
+                          setCreatingDoc(false);
+                          setShowCreateDoc(false);
+                        }}
+                        disabled={creatingDoc}
+                        className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                      >
+                        {creatingDoc ? "Bezig…" : "Bevestig document"}
+                      </button>
+                      <button onClick={() => setShowCreateDoc(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                        Annuleer
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 
