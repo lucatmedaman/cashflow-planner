@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.61.1";
+const APP_VERSION = "1.61.2";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -554,9 +554,12 @@ export default function CashflowPlanner() {
   const [view, setView] = useState("planning"); // planning | rapport
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef(null);
+  const [showEntityMenu, setShowEntityMenu] = useState(false);
+  const entityMenuRef = useRef(null);
   useEffect(() => {
     function onDocClick(e) {
       if (viewMenuRef.current && !viewMenuRef.current.contains(e.target)) setShowViewMenu(false);
+      if (entityMenuRef.current && !entityMenuRef.current.contains(e.target)) setShowEntityMenu(false);
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("touchstart", onDocClick);
@@ -2576,43 +2579,50 @@ export default function CashflowPlanner() {
             </div>
           )}
 
-          {/* Entity tabs */}
-          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4">
+          {/* Entity menu */}
+          <div ref={entityMenuRef} className="relative mt-3">
             <button
-              onClick={() => setActiveEntity("all")}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
-                activeEntity === "all"
-                  ? "bg-[#12181F] text-[#F4F6F5] border-[#12181F]"
-                  : "bg-white text-[#5B6570] border-[#E3E7E4]"
-              }`}
+              onClick={() => setShowEntityMenu((s) => !s)}
+              className="flex items-center gap-1.5 bg-white border border-[#E3E7E4] rounded-full pl-3 pr-3 py-1.5 text-sm text-[#12181F]"
             >
-              Alle
+              {activeEntity !== "all" && (
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: entityColor(entityById[activeEntity]).dot }} />
+              )}
+              {activeEntity === "all" ? "Alle boekhoudingen" : entityById[activeEntity]?.name}
+              <ChevronDown className={`w-4 h-4 text-[#93999F] transition-transform ${showEntityMenu ? "rotate-180" : ""}`} />
             </button>
-            {sortedEntities.map((e) => {
-              const c = entityColor(e);
-              const active = activeEntity === e.id;
-              return (
+            {showEntityMenu && (
+              <div className="absolute z-50 mt-1.5 left-0 w-64 max-h-80 overflow-y-auto bg-white border border-[#E3E7E4] rounded-xl shadow-lg py-1">
                 <button
-                  key={e.id}
-                  onClick={() => setActiveEntity(e.id)}
-                  className="shrink-0 px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5 transition"
-                  style={
-                    active
-                      ? { background: c.dot, borderColor: c.dot, color: "white" }
-                      : { background: "white", borderColor: "#E3E7E4", color: "#5B6570" }
-                  }
+                  onClick={() => { setActiveEntity("all"); setShowEntityMenu(false); }}
+                  className={`w-full text-left px-4 py-2 text-sm ${activeEntity === "all" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"}`}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: active ? "white" : c.dot }} />
-                  {e.name}
+                  Alle boekhoudingen
                 </button>
-              );
-            })}
-            <button
-              onClick={() => setView("boekhoudingen")}
-              className="shrink-0 px-3 py-1.5 rounded-full text-sm border border-dashed border-[#C7CCC9] text-[#93999F] flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" /> Boekhouding
-            </button>
+                {sortedEntities.map((e) => {
+                  const c = entityColor(e);
+                  const active = activeEntity === e.id;
+                  return (
+                    <button
+                      key={e.id}
+                      onClick={() => { setActiveEntity(e.id); setShowEntityMenu(false); }}
+                      className={`w-full text-left px-4 py-2 text-sm flex items-center gap-1.5 ${active ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"}`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? "white" : c.dot }} />
+                      {e.name}
+                    </button>
+                  );
+                })}
+                <div className="border-t border-slate-100 mt-1 pt-1">
+                  <button
+                    onClick={() => { setView("boekhoudingen"); setShowEntityMenu(false); }}
+                    className="w-full text-left px-4 py-2 text-sm text-[#93999F] flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Boekhouding toevoegen
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {view === "crediteuren" && (
