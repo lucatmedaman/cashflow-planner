@@ -132,6 +132,70 @@ async function logFailureToAirtable(step, message, targetEntityId, extra) {
   }
 }
 
+// ---- Herhalende-post-matching (mini-poort van dezelfde logica als in de
+// app zelf) — vindt een bestaande post met Herhaling ≠ "once" die deze
+// factuur vermoedelijk dekt, zodat we BIJWERKEN i.p.v. verdubbelen. ----
+function addDaysISO(iso, n) {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function addMonthsISO(iso, n) {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+}
+function stepForRecurrence(recurrence) {
+  switch (recurrence) {
+    case "weekly": return (iso) => addDaysISO(iso, 7);
+    case "biweekly": return (iso) => addDaysISO(iso, 14);
+    case "monthly": return (iso) => addMonthsISO(iso, 1);
+    case "bimonthly": return (iso) => addMonthsISO(iso, 2);
+    case "quarterly": return (iso) => addMonthsISO(iso, 3);
+    case "yearly": return (iso) => addMonthsISO(iso, 12);
+    default: return null;
+  }
+}
+function daysBetween(isoA, isoB) {
+  return Math.abs(new Date(isoA + "T00:00:00Z") - new Date(isoB + "T00:00:00Z")) / 86400000;
+}
+const RECURRENCE_TOLERANCE = { weekly: 5, biweekly: 8, monthly: 12, bimonthly: 20, quarterly: 25, yearly: 40 };
+
+async function findRecurringMatch({ targetEntityId, counterpartyId, dueDate }) {
+  const url = new URL(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}`);
+  url.searchParams.set(
+    "filterByFormula",
+    `AND({Herhaling} != "once", {Richting} = "uit", ARRAYJOIN({Boekhouding}) = "${targetEntityId}", ARRAYJOIN({DebiteurCrediteur}) = "${counterpartyId}")`
+  );
+  const res = await fetch(url.toString(), { headers: airtableHeaders() });
+  const data = await res.json();
+  if (!res.ok || !(data.records || []).length) return null;
+
+  let best = null;
+  let bestDiff = Infinity;
+  for (const rec of data.records) {
+    const f = rec.fields;
+    const step = stepForRecurrence(f.Herhaling);
+    if (!step || !f.Datum) continue;
+    const tolerance = RECURRENCE_TOLERANCE[f.Herhaling] || 15;
+    let paidDates = [];
+    try { paidDates = JSON.parse(f.BetaaldeData || "[]"); } catch (e) {}
+    // Stap vanaf de anchor-datum vooruit tot binnen tolerantie-bereik van de
+    // factuur-vervaldatum (begrensd, zodat een oude post nooit oneindig
+    // doorloopt).
+    let cursor = f.Datum;
+    for (let i = 0; i < 500 && cursor <= addDaysISO(dueDate, tolerance); i++) {
+      const diff = daysBetween(cursor, dueDate);
+      if (diff <= tolerance && !paidDates.includes(cursor) && diff < bestDiff) {
+        bestDiff = diff;
+        best = { id: rec.id, fields: f };
+      }
+      cursor = step(cursor);
+    }
+  }
+  return best;
+}
+
 export default async function handler(req, res) {
   const entityKey = (req.query?.entity || DEFAULT_ENTITY_KEY).toLowerCase();
   const targetEntityId = ENTITY_MAP[entityKey] || ENTITY_MAP[DEFAULT_ENTITY_KEY];
@@ -217,6 +281,41 @@ export default async function handler(req, res) {
 
     step = "crediteur_aanmaken";
     const counterpartyId = await resolveCounterpartyId(supplierName);
+
+    step = "herhalende_post_check";
+    const recurringMatch = await findRecurringMatch({ targetEntityId, counterpartyId, dueDate });
+    if (recurringMatch) {
+      step = "herhalende_post_bijwerken";
+      const updateFields = {
+        Bedrag: amount,
+        Rekeningnummer: iban || recurringMatch.fields.Rekeningnummer || "",
+        Factuurdatum: issueDate || null,
+        Opmerking: `Bijgewerkt via Billtobox op ${new Date().toISOString().slice(0, 10)} — was een herhalende post, geen dubbele aangemaakt (factuur ${invoiceNumber}).`,
+        BankRef: dedupRef,
+      };
+      const updateRes = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}`, {
+        method: "PATCH",
+        headers: airtableHeaders(),
+        body: JSON.stringify({ records: [{ id: recurringMatch.id, fields: updateFields }] }),
+      });
+      const updateData = await updateRes.json();
+      if (!updateRes.ok) {
+        await logFailureToAirtable("Airtable weigerde update herhalende post", JSON.stringify(updateData).slice(0, 800), targetEntityId, `factuur ${invoiceNumber}, ${supplierName}, €${amount}`);
+        res.status(502).json({ error: "Airtable weigerde de update van de herhalende post.", detail: updateData });
+        return;
+      }
+      res.status(200).json({
+        status: "ok",
+        note: "Bestaande herhalende post bijgewerkt — geen nieuwe post aangemaakt.",
+        entity: entityKey,
+        recordId: recurringMatch.id,
+        supplier: supplierName,
+        amount,
+        dueDate,
+        invoiceNumber,
+      });
+      return;
+    }
 
     step = "post_aanmaken";
     const fields = {
