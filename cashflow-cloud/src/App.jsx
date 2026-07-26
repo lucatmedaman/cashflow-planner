@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.61.2";
+const APP_VERSION = "1.62.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -608,6 +608,9 @@ export default function CashflowPlanner() {
   const [ublSaving, setUblSaving] = useState(false);
   const [ublError, setUblError] = useState("");
   const [ublFollowUp, setUblFollowUp] = useState(null); // {pdfFile, filename, entity}
+  const [recurringDraft, setRecurringDraft] = useState(null); // {payment, entityId, counterparty, counterpartyId, description, amount, dueDate, recurrence, endDate}
+  const [recurringSaving, setRecurringSaving] = useState(false);
+  const [importNotice, setImportNotice] = useState("");
   const [sendingToAccountant, setSendingToAccountant] = useState(false);
   const [sendResult, setSendResult] = useState(null); // {ok, message}
   const [importMsg, setImportMsg] = useState("");
@@ -1411,6 +1414,46 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Vanuit een betaling een HERHALENDE post opzetten (i.p.v. de eenmalige
+  // "maak document" hierboven) — voor het geval waarin je weet dat een
+  // betaling zich periodiek zal herhalen nog vóór er een formele factuur
+  // per periode binnenkomt. Deze betaling zelf wordt als eerste betaalde
+  // occurrence gekoppeld, net als bij "maak document".
+  async function createRecurringPostFromPayment(payment, draft) {
+    try {
+      const fields = itemToFields({
+        description: draft.description,
+        entityId: draft.entityId,
+        counterpartyId: draft.counterpartyId,
+        accountNumber: "",
+        note: "Aangemaakt vanuit een betaling als herhalende post — wordt bijgewerkt zodra de formele factuur binnenkomt (Billtobox of handmatig), i.p.v. verdubbeld.",
+        amount: Number(draft.amount),
+        direction: payment.direction,
+        dueDate: draft.dueDate,
+        payDate: payment.date,
+        invoiceDate: null,
+        recurrence: draft.recurrence,
+        endDate: draft.endDate || null,
+        viaPaypal: false,
+        source: payment.source,
+        bankRef: payment.bankRef,
+        bankSnapshot: payment.raw ? JSON.stringify({ ...payment.raw, wasCreated: true }) : "",
+        read: false,
+        categoryId: payment.categoryId,
+        projectId: payment.projectId,
+        paidDates: [],
+      });
+      const [rec] = await atCreate(TABLES.items, [{ fields }]);
+      const created = itemFromRecord(rec);
+      setItems((prev) => [...prev, created]);
+      await linkPaymentToDocument(payment, created);
+      return created;
+    } catch (err) {
+      setAirtableError(err.message);
+      return null;
+    }
+  }
+
   // Toegepast op ALLE bestaande crediteuren, niet enkel nieuwe: elke naam die
   // een Patroon uit de Naammapping-tabel bevat (hoofdletterongevoelig, losse
   // substring) wordt hernoemd naar CorrecteNaam. Bestaat er al een crediteur
@@ -1892,6 +1935,34 @@ export default function CashflowPlanner() {
     reader.readAsArrayBuffer(file);
   }
 
+  // Vindt een bestaande HERHALENDE post (Herhaling ≠ once) van dezelfde
+  // crediteur/boekhouding/richting met een nog-onbetaalde occurrence dicht
+  // bij de vervaldatum van een binnenkomende factuur. Gebruikt door zowel
+  // UBL- als PDF-import: als zo'n post bestaat, wordt hij BIJGEWERKT i.p.v.
+  // dat er een dubbele, aparte post naast komt te staan.
+  function findRecurringMatch({ entityId, counterpartyId, direction, dueDate }) {
+    if (!counterpartyId) return null;
+    const target = fromISO(dueDate);
+    const candidates = items.filter(
+      (i) => i.entityId === entityId && i.counterpartyId === counterpartyId && i.direction === direction && i.recurrence !== "once"
+    );
+    let best = null;
+    let bestDiff = Infinity;
+    for (const it of candidates) {
+      // Tolerantie op maat van het ritme — ruim genoeg om een factuur die
+      // wat vroeger/later valt dan de vorige keer toch te herkennen, strak
+      // genoeg om nooit de verkeerde periode te raken.
+      const tolerance = { weekly: 5, biweekly: 8, monthly: 12, bimonthly: 20, quarterly: 25, yearly: 40 }[it.recurrence] || 15;
+      const occs = generateOccurrences(it, toISO(addDays(target, -tolerance)), toISO(addDays(target, tolerance)))
+        .filter((o) => !(it.paidDates || []).includes(o.date));
+      for (const o of occs) {
+        const diff = Math.abs(fromISO(o.date) - target);
+        if (diff < bestDiff) { bestDiff = diff; best = it; }
+      }
+    }
+    return best;
+  }
+
   async function submitUblImport() {
     if (!ublDraft) return;
     if (!ublDraft.entityId) { setUblError("Kies eerst een boekhouding."); return; }
@@ -1901,28 +1972,60 @@ export default function CashflowPlanner() {
     setUblSaving(true);
     try {
       const counterpartyId = await resolveCounterpartyId(ublDraft.counterparty);
-      const draft = {
+      const recurringMatch = findRecurringMatch({
         entityId: ublDraft.entityId,
-        description: ublDraft.description.trim(),
-        accountNumber: ublDraft.accountNumber || "",
-        note: ublDraft.source === "PDF" ? "Handmatig ingelezen via 'PDF-factuur inlezen' — controleer de gegevens" : "Handmatig ingelezen via 'UBL inlezen'",
         counterpartyId,
-        amount: Math.abs(Number(ublDraft.amount)),
         direction: "uit",
         dueDate: ublDraft.dueDate,
-        payDate: ublDraft.dueDate,
-        invoiceDate: ublDraft.invoiceDate || null,
-        recurrence: "once",
-        endDate: null,
-        viaPaypal: false,
-        priority: "",
-        paidDates: [],
-      };
-      const fields = itemToFields(draft);
-      fields.Bron = ublDraft.source === "PDF" ? "Handmatig" : "Billtobox";
-      const [rec] = await atCreate(TABLES.items, [{ fields }]);
-      const created = itemFromRecord(rec);
-      setItems((prev) => [...prev, created]);
+      });
+
+      let created;
+      if (recurringMatch) {
+        // Bestaande herhalende post bijwerken i.p.v. een dubbele aanmaken.
+        // De vervalanchor (Datum) en Herhaling blijven ongewijzigd — enkel
+        // de gegevens die per levering kunnen verschillen worden ververst.
+        const updateFields = {
+          Bedrag: Math.abs(Number(ublDraft.amount)),
+          Factuurdatum: ublDraft.invoiceDate || null,
+          Rekeningnummer: ublDraft.accountNumber || recurringMatch.accountNumber || "",
+          Opmerking: `Bijgewerkt via ${ublDraft.source === "PDF" ? "'PDF-factuur inlezen'" : "'UBL inlezen'"} op ${todayISO()} — was een herhalende post, geen dubbele aangemaakt.`,
+          Bron: ublDraft.source === "PDF" ? "Handmatig" : "Billtobox",
+        };
+        await atUpdate(TABLES.items, [{ id: recurringMatch.id, fields: updateFields }]);
+        created = {
+          ...recurringMatch,
+          amount: updateFields.Bedrag,
+          invoiceDate: updateFields.Factuurdatum,
+          accountNumber: updateFields.Rekeningnummer,
+          note: updateFields.Opmerking,
+          source: updateFields.Bron,
+        };
+        setItems((prev) => prev.map((i) => (i.id === recurringMatch.id ? created : i)));
+        setImportNotice(`Herhalende post "${recurringMatch.description}" bijgewerkt (bedrag/factuurdatum) — geen nieuwe post aangemaakt.`);
+      } else {
+        const draft = {
+          entityId: ublDraft.entityId,
+          description: ublDraft.description.trim(),
+          accountNumber: ublDraft.accountNumber || "",
+          note: ublDraft.source === "PDF" ? "Handmatig ingelezen via 'PDF-factuur inlezen' — controleer de gegevens" : "Handmatig ingelezen via 'UBL inlezen'",
+          counterpartyId,
+          amount: Math.abs(Number(ublDraft.amount)),
+          direction: "uit",
+          dueDate: ublDraft.dueDate,
+          payDate: ublDraft.dueDate,
+          invoiceDate: ublDraft.invoiceDate || null,
+          recurrence: "once",
+          endDate: null,
+          viaPaypal: false,
+          priority: "",
+          paidDates: [],
+        };
+        const fields = itemToFields(draft);
+        fields.Bron = ublDraft.source === "PDF" ? "Handmatig" : "Billtobox";
+        const [rec] = await atCreate(TABLES.items, [{ fields }]);
+        created = itemFromRecord(rec);
+        setItems((prev) => [...prev, created]);
+      }
       markSynced();
 
       if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
@@ -1937,6 +2040,22 @@ export default function CashflowPlanner() {
       setUblError(`Opslaan mislukt: ${err.message}`);
     } finally {
       setUblSaving(false);
+    }
+  }
+
+  async function submitRecurringDraft() {
+    if (!recurringDraft) return;
+    if (!recurringDraft.description.trim() || !recurringDraft.amount || !recurringDraft.dueDate) return;
+    setRecurringSaving(true);
+    try {
+      let counterpartyId = recurringDraft.counterpartyId;
+      if (!counterpartyId && recurringDraft.counterparty.trim()) {
+        counterpartyId = await resolveCounterpartyId(recurringDraft.counterparty.trim());
+      }
+      await createRecurringPostFromPayment(recurringDraft.payment, { ...recurringDraft, counterpartyId });
+      setRecurringDraft(null);
+    } finally {
+      setRecurringSaving(false);
     }
   }
 
@@ -2579,6 +2698,13 @@ export default function CashflowPlanner() {
             </div>
           )}
 
+          {importNotice && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">
+              <span className="flex-1">✓ {importNotice}</span>
+              <button onClick={() => setImportNotice("")} className="shrink-0"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
+
           {/* Entity menu */}
           <div ref={entityMenuRef} className="relative mt-3">
             <button
@@ -2918,6 +3044,19 @@ export default function CashflowPlanner() {
             onOpenDetail={openDetail}
             onDeletePayment={deletePayment}
             onCounterpartyClick={goToCounterparty}
+            onOpenRecurringDraft={(payment) =>
+              setRecurringDraft({
+                payment,
+                entityId: payment.entityId,
+                counterparty: counterpartyById[payment.counterpartyId]?.name || payment.description,
+                counterpartyId: payment.counterpartyId || null,
+                description: payment.description,
+                amount: payment.amount,
+                dueDate: payment.date,
+                recurrence: "monthly",
+                endDate: "",
+              })
+            }
           />
         ) : (
           <BoekhoudingenView
@@ -3213,6 +3352,96 @@ export default function CashflowPlanner() {
             <button onClick={() => { setUblFollowUp(null); setSendResult(null); }} className="w-full text-xs text-slate-400 pt-1">
               Sluiten
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Herhalende post aanmaken vanuit een betaling */}
+      {recurringDraft && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-4 space-y-2.5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-800">Herhalende post opzetten</p>
+              <button onClick={() => setRecurringDraft(null)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Deze betaling wordt meteen als eerste betaalde occurrence gekoppeld. Zodra de formele factuur binnenkomt (Billtobox of handmatig via UBL/PDF) voor eenzelfde crediteur rond een volgende vervaldag, wordt deze post bijgewerkt in plaats van verdubbeld.
+            </p>
+            <div>
+              <label className="text-[11px] text-slate-400">Omschrijving</label>
+              <input
+                value={recurringDraft.description}
+                onChange={(e) => setRecurringDraft({ ...recurringDraft, description: e.target.value })}
+                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-slate-400">Debiteur/crediteur</label>
+              <CounterpartyAutocomplete
+                value={recurringDraft.counterparty}
+                onChange={(v) => setRecurringDraft({ ...recurringDraft, counterparty: v, counterpartyId: null })}
+                counterparties={counterparties}
+                inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-slate-400">Bedrag</label>
+                <input
+                  type="number" step="0.01"
+                  value={recurringDraft.amount}
+                  onChange={(e) => setRecurringDraft({ ...recurringDraft, amount: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">Eerste vervaldatum</label>
+                <input
+                  type="date"
+                  value={recurringDraft.dueDate}
+                  onChange={(e) => setRecurringDraft({ ...recurringDraft, dueDate: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] text-slate-400">Herhaling</label>
+                <select
+                  value={recurringDraft.recurrence}
+                  onChange={(e) => setRecurringDraft({ ...recurringDraft, recurrence: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                >
+                  <option value="weekly">Wekelijks</option>
+                  <option value="biweekly">Tweewekelijks</option>
+                  <option value="monthly">Maandelijks</option>
+                  <option value="bimonthly">Tweemaandelijks</option>
+                  <option value="quarterly">Driemaandelijks</option>
+                  <option value="yearly">Jaarlijks</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-400">Einddatum (optioneel)</label>
+                <input
+                  type="date"
+                  value={recurringDraft.endDate}
+                  onChange={(e) => setRecurringDraft({ ...recurringDraft, endDate: e.target.value })}
+                  className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={submitRecurringDraft}
+                disabled={recurringSaving || !recurringDraft.description.trim() || !recurringDraft.amount || !recurringDraft.dueDate}
+                className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-40"
+              >
+                {recurringSaving ? "Bezig…" : "Herhalende post aanmaken"}
+              </button>
+              <button onClick={() => setRecurringDraft(null)} className="px-4 rounded-lg border border-slate-200 text-sm">
+                Annuleer
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -5960,7 +6189,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 // betalingen met "geen document nodig", die in het Koppelen-scherm nergens
 // verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
 // vallen.
-function BetalingenView({ payments, entityById, counterpartyById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick }) {
+function BetalingenView({ payments, entityById, counterpartyById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
 
   function statusOf(p) {
@@ -6077,6 +6306,12 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
                     {project && <> · {project.name}</>}
                   </p>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onOpenRecurringDraft(p); }}
+                  className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+                >
+                  herhalende post
+                </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
                   className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
