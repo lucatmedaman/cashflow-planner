@@ -11,7 +11,17 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.61.0";
+const APP_VERSION = "1.61.1";
+const VIEW_LABELS = {
+  planning: "Planning",
+  rapport: "Rapport",
+  grafiek: "Grafiek",
+  crediteuren: "Crediteuren",
+  afpunten: "Afpunten",
+  koppelen: "Koppelen",
+  betalingen: "Betalingen",
+  boekhoudingen: "Boekhoudingen",
+};
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -542,6 +552,19 @@ export default function CashflowPlanner() {
   const [syncToast, setSyncToast] = useState(false);
 
   const [view, setView] = useState("planning"); // planning | rapport
+  const [showViewMenu, setShowViewMenu] = useState(false);
+  const viewMenuRef = useRef(null);
+  useEffect(() => {
+    function onDocClick(e) {
+      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target)) setShowViewMenu(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("touchstart", onDocClick);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("touchstart", onDocClick);
+    };
+  }, []);
   const [jumpToCounterpartyId, setJumpToCounterpartyId] = useState(null);
   const [activeEntity, setActiveEntity] = useState("all");
 
@@ -2423,55 +2446,35 @@ export default function CashflowPlanner() {
               </h1>
               <p className="text-[12.5px] text-[#5B6570] mt-0.5">Te betalen &amp; te ontvangen, per boekhouding</p>
             </div>
-            <div className="flex bg-white border border-[#E3E7E4] rounded-full p-0.5 text-sm overflow-x-auto max-w-full">
+            <div ref={viewMenuRef} className="relative shrink-0">
               <button
-                onClick={() => setView("planning")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "planning" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
+                onClick={() => setShowViewMenu((s) => !s)}
+                className="flex items-center gap-1.5 bg-white border border-[#E3E7E4] rounded-full px-4 py-1.5 text-sm text-[#12181F] font-medium"
               >
-                Planning
+                {VIEW_LABELS[view]}
+                {view === "afpunten" && unreadCount > 0 ? ` (${unreadCount})` : ""}
+                <ChevronDown className={`w-4 h-4 text-[#93999F] transition-transform ${showViewMenu ? "rotate-180" : ""}`} />
               </button>
-              <button
-                onClick={() => setView("rapport")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "rapport" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Rapport
-              </button>
-              <button
-                onClick={() => setView("grafiek")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "grafiek" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Grafiek
-              </button>
-              <button
-                onClick={() => setView("crediteuren")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "crediteuren" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Crediteuren
-              </button>
-              <button
-                onClick={() => setView("afpunten")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "afpunten" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Afpunten{unreadCount > 0 ? ` (${unreadCount})` : ""}
-              </button>
-              <button
-                onClick={() => setView("koppelen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "koppelen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Koppelen
-              </button>
-              <button
-                onClick={() => setView("betalingen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "betalingen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Betalingen
-              </button>
-              <button
-                onClick={() => setView("boekhoudingen")}
-                className={`px-3 py-1.5 rounded-full transition ${view === "boekhoudingen" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#5B6570]"}`}
-              >
-                Boekhoudingen
-              </button>
+              {showViewMenu && (
+                <div className="absolute z-50 mt-1.5 right-0 w-52 bg-white border border-[#E3E7E4] rounded-xl shadow-lg py-1 overflow-hidden">
+                  {Object.entries(VIEW_LABELS).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => { setView(key); setShowViewMenu(false); }}
+                      className={`w-full text-left px-4 py-2 text-sm flex items-center justify-between ${
+                        view === key ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"
+                      }`}
+                    >
+                      {label}
+                      {key === "afpunten" && unreadCount > 0 && (
+                        <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${view === key ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>
+                          {unreadCount}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
