@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.62.0";
+const APP_VERSION = "1.63.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -2043,6 +2043,35 @@ export default function CashflowPlanner() {
     }
   }
 
+  const ITEM_QUICK_FIELD_MAP = {
+    description: "Omschrijving", amount: "Bedrag", direction: "Richting", dueDate: "Datum",
+    payDate: "Betaaldatum", invoiceDate: "Factuurdatum", recurrence: "Herhaling", endDate: "Einddatum",
+    accountNumber: "Rekeningnummer", note: "Opmerking",
+  };
+  async function updateItemQuickField(id, key, value) {
+    const airtableField = ITEM_QUICK_FIELD_MAP[key];
+    if (!airtableField) return;
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, [key]: value } : i)));
+    try {
+      await atUpdate(TABLES.items, [{ id, fields: { [airtableField]: value === "" ? null : value } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+  const PAYMENT_QUICK_FIELD_MAP = { description: "Omschrijving", amount: "Bedrag", direction: "Richting", date: "Datum" };
+  async function updatePaymentQuickField(id, key, value) {
+    const airtableField = PAYMENT_QUICK_FIELD_MAP[key];
+    if (!airtableField) return;
+    setPayments((prev) => prev.map((p) => (p.id === id ? { ...p, [key]: value } : p)));
+    try {
+      await atUpdate(TABLES.payments, [{ id, fields: { [airtableField]: value } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   async function submitRecurringDraft() {
     if (!recurringDraft) return;
     if (!recurringDraft.description.trim() || !recurringDraft.amount || !recurringDraft.dueDate) return;
@@ -3467,6 +3496,8 @@ export default function CashflowPlanner() {
           onResolveCounterparty={resolveCounterpartyId}
           onUpdatePaymentCounterparty={updatePaymentCounterparty}
           onCounterpartyClick={goToCounterparty}
+          onUpdateItemField={updateItemQuickField}
+          onUpdatePaymentField={updatePaymentQuickField}
         />
       )}
 
@@ -5958,7 +5989,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -6005,6 +6036,51 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
     );
   }
 
+  // Klik-om-te-wijzigen: lokale state per toetsaanslag voor directe
+  // feedback, wegschrijven pas on-blur (tekst/getal) of on-change
+  // (select/datum) — zelfde patroon als de boekhouding-velden elders in de
+  // app. `field` is de JS-veldnaam op record (bv. "description", "amount").
+  function updateField(field, value) {
+    if (type === "item") onUpdateItemField(record.id, field, value);
+    else onUpdatePaymentField(record.id, field, value);
+  }
+  function EditableField({ label, field, type: inputType = "text", options }) {
+    const [local, setLocal] = useState(record[field] ?? "");
+    useEffect(() => { setLocal(record[field] ?? ""); }, [record[field]]);
+    const commit = () => {
+      const parsed = inputType === "number" ? Number(local) : local;
+      if (parsed !== (record[field] ?? "")) updateField(field, parsed);
+    };
+    if (inputType === "select") {
+      return (
+        <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+          <span className="text-[11px] text-slate-400 shrink-0">{label}</span>
+          <select
+            value={local}
+            onChange={(e) => { setLocal(e.target.value); updateField(field, e.target.value); }}
+            className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 bg-white"
+          >
+            {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+        <span className="text-[11px] text-slate-400 shrink-0">{label}</span>
+        <input
+          type={inputType}
+          step={inputType === "number" ? "0.01" : undefined}
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 w-36"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-40" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[30rem] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -6017,7 +6093,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
         </div>
 
         <div>
-          <Row label="Omschrijving" value={record.description} />
+          <EditableField label="Omschrijving" field="description" />
           <Row label="Boekhouding" value={entity?.name} />
           {type === "item" ? (
             <Row
@@ -6075,23 +6151,28 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               </div>
             </div>
           )}
-          <Row label="Bedrag" value={`${record.direction === "in" ? "+" : "−"}${eur(record.amount)}`} />
-          <Row label="Richting" value={record.direction === "in" ? "Inkomst" : "Uitgave"} />
+          <EditableField label="Bedrag" field="amount" type="number" />
+          <EditableField label="Richting" field="direction" type="select" options={[{ value: "in", label: "Inkomst" }, { value: "uit", label: "Uitgave" }]} />
           {type === "item" ? (
             <>
-              <Row label="Vervaldatum" value={record.dueDate} />
-              <Row label="Betaaldatum" value={record.payDate} />
-              <Row label="Factuurdatum" value={record.invoiceDate} />
-              <Row label="Herhaling" value={RECURRENCE_OPTIONS.find((o) => o.value === record.recurrence)?.label} />
-              <Row label="Einddatum" value={record.endDate} />
-              <Row label="Rekeningnummer" value={record.accountNumber} />
-              <Row label="Opmerking" value={record.note} />
+              <EditableField label="Vervaldatum" field="dueDate" type="date" />
+              <EditableField label="Betaaldatum" field="payDate" type="date" />
+              <EditableField label="Factuurdatum" field="invoiceDate" type="date" />
+              <EditableField
+                label="Herhaling"
+                field="recurrence"
+                type="select"
+                options={RECURRENCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
+              <EditableField label="Einddatum" field="endDate" type="date" />
+              <EditableField label="Rekeningnummer" field="accountNumber" />
+              <EditableField label="Opmerking" field="note" />
               <Row label="Via PayPal" value={record.viaPaypal ? "Ja" : null} />
               <Row label="Gelezen" value={record.read ? "Ja" : "Nee"} />
               <Row label="Betaalde data" value={(record.paidDates || []).length > 0 ? record.paidDates.join(", ") : null} />
             </>
           ) : (
-            <Row label="Datum" value={record.date} />
+            <EditableField label="Datum" field="date" type="date" />
           )}
           <Row label="Bron" value={record.source} />
           <Row label={type === "item" ? "BankRef" : "Bankreferentie"} value={record.bankRef} />
