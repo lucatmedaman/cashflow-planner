@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.64.4";
+const APP_VERSION = "1.65.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -291,6 +291,7 @@ function paymentFromRecord(r) {
     source: r.fields.Bron || "Cash-handmatig",
     bankRef: r.fields.Bankreferentie || "",
     volgnummer: r.fields.Volgnummer || "",
+    transferType: r.fields.OverschrijvingType || "",
     raw,
     categoryId: r.fields.Categorie?.[0] || null,
     projectId: r.fields.Project?.[0] || null,
@@ -309,6 +310,7 @@ function paymentToFields(payment) {
     Bron: payment.source || "Cash-handmatig",
     Bankreferentie: payment.bankRef || "",
     Volgnummer: payment.volgnummer || "",
+    OverschrijvingType: payment.transferType || null,
     RuweBrongegevens: payment.raw ? JSON.stringify(payment.raw) : "",
     Categorie: payment.categoryId ? [payment.categoryId] : [],
     Project: payment.projectId ? [payment.projectId] : [],
@@ -1732,6 +1734,16 @@ export default function CashflowPlanner() {
     return rows;
   }, [items]);
 
+  // "Interne overschrijving"-categorie: telt wél mee in elke boekhouding
+  // afzonderlijk (echte cashflow voor die ene boekhouding), maar wordt
+  // uitgesloten uit de GECOMBINEERDE ("Alle boekhoudingen") cijfers, waar
+  // een overschrijving tussen twee eigen boekhoudingen anders dubbel zou
+  // tellen (uitgave bij de ene, inkomst bij de andere, netto nul voor de
+  // groep als geheel). Berekend hier al, ver vóór het eerste gebruik
+  // (grandTotal), want const-declaraties in dit component worden niet
+  // gehoist.
+  const internalTransferCategoryId = categories.find((c) => c.name === "Interne overschrijving")?.id || null;
+
   const reportTotals = useMemo(() => {
     return reportEntities.map((e) => {
       let inSum = 0, uitSum = 0;
@@ -1745,10 +1757,16 @@ export default function CashflowPlanner() {
     });
   }, [reportEntities, allOccurrenceRows]);
 
-  const grandTotal = reportTotals.reduce(
-    (acc, r) => ({ inSum: acc.inSum + r.inSum, uitSum: acc.uitSum + r.uitSum, net: acc.net + r.net }),
-    { inSum: 0, uitSum: 0, net: 0 }
-  );
+  const grandTotal = useMemo(() => {
+    let inSum = 0, uitSum = 0;
+    allOccurrenceRows
+      .filter((r) => !r.paid && r.date >= todayISO() && r.item.categoryId !== internalTransferCategoryId)
+      .forEach((r) => {
+        if (r.item.direction === "in") inSum += Number(r.item.amount);
+        else uitSum += Number(r.item.amount);
+      });
+    return { inSum, uitSum, net: inSum - uitSum };
+  }, [allOccurrenceRows, internalTransferCategoryId]);
 
   // ---- counterparties (debiteuren/crediteuren) — kept as a separate normalized list
   // so it can later be split into its own file/table without restructuring anything else.
@@ -2046,26 +2064,28 @@ export default function CashflowPlanner() {
   const ITEM_QUICK_FIELD_MAP = {
     description: "Omschrijving", amount: "Bedrag", direction: "Richting", dueDate: "Datum",
     payDate: "Betaaldatum", invoiceDate: "Factuurdatum", recurrence: "Herhaling", endDate: "Einddatum",
-    accountNumber: "Rekeningnummer", note: "Opmerking",
+    accountNumber: "Rekeningnummer", note: "Opmerking", categoryId: "Categorie",
   };
   async function updateItemQuickField(id, key, value) {
     const airtableField = ITEM_QUICK_FIELD_MAP[key];
     if (!airtableField) return;
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, [key]: value } : i)));
     try {
-      await atUpdate(TABLES.items, [{ id, fields: { [airtableField]: value === "" ? null : value } }]);
+      const fieldValue = key === "categoryId" ? (value ? [value] : []) : value === "" ? null : value;
+      await atUpdate(TABLES.items, [{ id, fields: { [airtableField]: fieldValue } }]);
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
     }
   }
-  const PAYMENT_QUICK_FIELD_MAP = { description: "Omschrijving", amount: "Bedrag", direction: "Richting", date: "Datum" };
+  const PAYMENT_QUICK_FIELD_MAP = { description: "Omschrijving", amount: "Bedrag", direction: "Richting", date: "Datum", transferType: "OverschrijvingType", categoryId: "Categorie" };
   async function updatePaymentQuickField(id, key, value) {
     const airtableField = PAYMENT_QUICK_FIELD_MAP[key];
     if (!airtableField) return;
     setPayments((prev) => prev.map((p) => (p.id === id ? { ...p, [key]: value } : p)));
     try {
-      await atUpdate(TABLES.payments, [{ id, fields: { [airtableField]: value } }]);
+      const fieldValue = key === "categoryId" ? (value ? [value] : []) : value;
+      await atUpdate(TABLES.payments, [{ id, fields: { [airtableField]: fieldValue } }]);
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -2571,6 +2591,7 @@ export default function CashflowPlanner() {
     sortedEntities.forEach((e) => { entityStartDates[e.id] = startDateFor(e); });
 
     const combinedRows = allUpcomingRows
+      .filter((r) => r.item.categoryId !== internalTransferCategoryId)
       .map((r) => ({ ...r, date: projectedPayDate(r) }))
       .filter((r) => r.date >= (entityStartDates[r.item.entityId] || todayISO()))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -2583,7 +2604,7 @@ export default function CashflowPlanner() {
     });
 
     return { perEntity, combinedOpening, combinedLedger, combinedEnding: combinedBalance };
-  }, [sortedEntities, entities, allUpcomingRows]);
+  }, [sortedEntities, entities, allUpcomingRows, internalTransferCategoryId]);
 
   if (loading) {
     return (
@@ -6229,8 +6250,34 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           <Row label="Bron" value={record.source} />
           <Row label={type === "item" ? "BankRef" : "Bankreferentie"} value={record.bankRef} />
           {type === "payment" && <Row label="Volgnummer" value={record.volgnummer} />}
-          <Row label="Categorie" value={category?.name} />
+          <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+            <span className="text-[11px] text-slate-400 shrink-0">Categorie</span>
+            <select
+              value={record.categoryId || ""}
+              onChange={(e) => updateField("categoryId", e.target.value || null)}
+              className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 bg-white max-w-[60%]"
+            >
+              <option value="">— geen —</option>
+              {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
           <Row label="Project" value={project?.name} />
+          {type === "payment" && (
+            <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+              <span className="text-[11px] text-slate-400 shrink-0">Interne overschrijving</span>
+              <select
+                value={record.transferType || ""}
+                onChange={(e) => updateField("transferType", e.target.value)}
+                className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 bg-white"
+              >
+                <option value="">— geen —</option>
+                <option value="Rekening-courant">Rekening-courant</option>
+                <option value="Dividend">Dividend</option>
+                <option value="Kosten doorrekening">Kosten doorrekening</option>
+                <option value="Andere">Andere</option>
+              </select>
+            </div>
+          )}
           {type === "payment" && <Row label="Geen document nodig" value={record.noDocumentNeeded ? "Ja" : null} />}
         </div>
 
