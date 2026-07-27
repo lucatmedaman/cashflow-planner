@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.2";
+const APP_VERSION = "1.65.3";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -557,11 +557,14 @@ export default function CashflowPlanner() {
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef(null);
   const [showEntityMenu, setShowEntityMenu] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const actionsMenuRef = useRef(null);
   const entityMenuRef = useRef(null);
   useEffect(() => {
     function onDocClick(e) {
       if (viewMenuRef.current && !viewMenuRef.current.contains(e.target)) setShowViewMenu(false);
       if (entityMenuRef.current && !entityMenuRef.current.contains(e.target)) setShowEntityMenu(false);
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target)) setShowActionsMenu(false);
     }
     document.addEventListener("mousedown", onDocClick);
     document.addEventListener("touchstart", onDocClick);
@@ -2698,34 +2701,63 @@ export default function CashflowPlanner() {
             ) : null}
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div ref={actionsMenuRef} className="relative mt-2">
             <button
-              onClick={exportData}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
+              onClick={() => setShowActionsMenu((s) => !s)}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
             >
-              <Download className="w-3.5 h-3.5" /> Exporteer JSON
+              Acties
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showActionsMenu ? "rotate-180" : ""}`} />
             </button>
-            <button
-              onClick={triggerImport}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
-              title="Importeert als nieuwe records in Airtable"
-            >
-              <Upload className="w-3.5 h-3.5" /> Importeer JSON
-            </button>
-            <button
-              onClick={openBankModal}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
-              title="Bankuittreksel inlezen (CAMT.053 XML of CSV-export) en matchen"
-            >
-              <Landmark className="w-3.5 h-3.5" /> Bank importeren
-            </button>
-            <button
-              onClick={() => ublFileInputRef.current?.click()}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
-              title="Eén UBL-factuur (.xml) rechtstreeks inlezen als post — handig als Billtobox een factuur toch niet doorstuurt"
-            >
-              <FileText className="w-3.5 h-3.5" /> UBL inlezen
-            </button>
+            {showActionsMenu && (
+              <div className="absolute z-30 mt-1.5 left-0 w-64 bg-white border border-slate-200 rounded-xl shadow-lg py-1">
+                <button
+                  onClick={() => { exportData(); setShowActionsMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-400" /> Exporteer JSON
+                </button>
+                <button
+                  onClick={() => { triggerImport(); setShowActionsMenu(false); }}
+                  title="Importeert als nieuwe records in Airtable"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Upload className="w-3.5 h-3.5 text-slate-400" /> Importeer JSON
+                </button>
+                <button
+                  onClick={() => { openBankModal(); setShowActionsMenu(false); }}
+                  title="Bankuittreksel inlezen (CAMT.053 XML of CSV-export) en matchen"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-slate-400" /> Bank importeren
+                </button>
+                <button
+                  onClick={() => { ublFileInputRef.current?.click(); setShowActionsMenu(false); }}
+                  title="Eén UBL-factuur (.xml) rechtstreeks inlezen als post"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <FileText className="w-3.5 h-3.5 text-slate-400" /> UBL inlezen
+                </button>
+                <button
+                  onClick={() => { pdfFileInputRef.current?.click(); setShowActionsMenu(false); }}
+                  disabled={pdfParsing}
+                  title="Een factuur als PDF inlezen als post — minder betrouwbaar dan UBL"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {pdfParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" /> : <FileText className="w-3.5 h-3.5 text-slate-400" />}
+                  PDF-factuur inlezen
+                </button>
+                <button
+                  onClick={() => { triggerPocketsmithSync(); setShowActionsMenu(false); }}
+                  disabled={pocketsmithSyncing}
+                  title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" /> : <RefreshCw className="w-3.5 h-3.5 text-slate-400" />}
+                  PocketSmith syncen
+                </button>
+              </div>
+            )}
             <input
               ref={ublFileInputRef}
               type="file"
@@ -2733,15 +2765,6 @@ export default function CashflowPlanner() {
               className="hidden"
               onChange={handleUblFileSelected}
             />
-            <button
-              onClick={() => pdfFileInputRef.current?.click()}
-              disabled={pdfParsing}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
-              title="Een factuur als PDF inlezen als post — minder betrouwbaar dan UBL, alles moet gecontroleerd worden vóór opslaan"
-            >
-              {pdfParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-              PDF-factuur inlezen
-            </button>
             <input
               ref={pdfFileInputRef}
               type="file"
@@ -2749,15 +2772,8 @@ export default function CashflowPlanner() {
               className="hidden"
               onChange={handlePdfFileSelected}
             />
-            <button
-              onClick={triggerPocketsmithSync}
-              disabled={pocketsmithSyncing}
-              className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 disabled:opacity-40"
-              title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
-            >
-              {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              PocketSmith syncen
-            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {(airtableError || offlineMode) && (
               <button
                 onClick={retrySync}
@@ -6525,7 +6541,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   return (
     <div className="mt-4 space-y-3">
       <div className="sticky top-0 z-20 bg-[#F4F6F5] pt-1 pb-2 -mx-1 px-1 space-y-3">
-        <p className="text-xs text-slate-400">Alle betalingen uit de Betalingen-tabel, ongeacht of ze aan een document gekoppeld zijn.</p>
+        {/* Uitlegregel weggehaald — nam op iPhone permanent ruimte in binnen het sticky blok, terwijl zoekveld + filters zelf al voldoende context geven. */}
 
         <input
           value={searchQuery}
