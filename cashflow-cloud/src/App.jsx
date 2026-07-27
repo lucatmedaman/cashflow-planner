@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.64.2";
+const APP_VERSION = "1.64.3";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -2143,10 +2143,14 @@ export default function CashflowPlanner() {
     // achteraf via "Toepassen" moet samenvoegen. Zelfde mapping-logica als
     // de Toepassen-knop en de PocketSmith-sync; eerste treffer wint.
     for (const m of nameMappings) {
-      const match = matchNamePattern(trimmed, m);
-      if (match && m.correctName) {
-        trimmed = resolveMappedName(m, match.captured).trim();
-        break;
+      try {
+        const match = matchNamePattern(trimmed, m);
+        if (match && m.correctName) {
+          trimmed = resolveMappedName(m, match.captured).trim();
+          break;
+        }
+      } catch (e) {
+        console.error("resolveCounterpartyId: naammapping oversloeg fout:", m, e);
       }
     }
     const existing = counterpartiesRef.current.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
@@ -2227,6 +2231,7 @@ export default function CashflowPlanner() {
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
+      throw err;
     }
   }
 
@@ -6392,6 +6397,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCounterparty, setBulkCounterparty] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [bulkError, setBulkError] = useState("");
   // Zelfde instelbare-sortering-patroon als "Ongekoppelde documenten"/
   // "Ongekoppelde betalingen" in Koppelen — was hier voorheen een vaste
   // datum+volgnummer-combinatie, nu net als daar zelf te kiezen.
@@ -6530,33 +6536,42 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
       )}
 
       {selectedIds.size > 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center gap-2">
-          <CounterpartyAutocomplete
-            value={bulkCounterparty}
-            onChange={setBulkCounterparty}
-            counterparties={counterparties || []}
-            placeholder="Debiteur/crediteur toewijzen aan selectie…"
-            className="flex-1"
-            inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-          />
-          <button
-            onClick={async () => {
-              if (!bulkCounterparty.trim()) return;
-              setBulkAssigning(true);
-              const counterpartyId = await onResolveCounterparty(bulkCounterparty.trim());
-              await onBulkAssignCounterparty([...selectedIds], counterpartyId);
-              setBulkAssigning(false);
-              setBulkCounterparty("");
-              setSelectedIds(new Set());
-            }}
-            disabled={!bulkCounterparty.trim() || bulkAssigning}
-            className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 shrink-0 disabled:opacity-40"
-          >
-            {bulkAssigning ? "Bezig…" : `Toewijzen aan ${selectedIds.size}`}
-          </button>
-          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 shrink-0">
-            Annuleer
-          </button>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <CounterpartyAutocomplete
+              value={bulkCounterparty}
+              onChange={(v) => { setBulkCounterparty(v); setBulkError(""); }}
+              counterparties={counterparties || []}
+              placeholder="Debiteur/crediteur toewijzen aan selectie…"
+              className="flex-1"
+              inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+            />
+            <button
+              onClick={async () => {
+                if (!bulkCounterparty.trim()) { setBulkError("Vul eerst een naam in."); return; }
+                setBulkError("");
+                setBulkAssigning(true);
+                try {
+                  const counterpartyId = await onResolveCounterparty(bulkCounterparty.trim());
+                  await onBulkAssignCounterparty([...selectedIds], counterpartyId);
+                  setBulkCounterparty("");
+                  setSelectedIds(new Set());
+                } catch (err) {
+                  setBulkError(`Toewijzen mislukt: ${err.message}`);
+                } finally {
+                  setBulkAssigning(false);
+                }
+              }}
+              disabled={bulkAssigning}
+              className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 shrink-0 disabled:opacity-40"
+            >
+              {bulkAssigning ? "Bezig…" : `Toewijzen aan ${selectedIds.size}`}
+            </button>
+            <button onClick={() => { setSelectedIds(new Set()); setBulkError(""); }} className="text-xs text-slate-400 shrink-0">
+              Annuleer
+            </button>
+          </div>
+          {bulkError && <p className="text-[11px] text-rose-600">{bulkError}</p>}
         </div>
       )}
 
