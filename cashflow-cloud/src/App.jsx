@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.3";
+const APP_VERSION = "1.65.4";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -6663,18 +6663,18 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
               <div
                 key={p.id}
                 onClick={() => onOpenDetail("payment", p.id)}
-                className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50"
+                className="px-3.5 py-2.5 cursor-pointer hover:bg-slate-50"
               >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(p.id)}
-                  onChange={() => toggleSelect(p.id)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-4 h-4 rounded border-slate-300 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <p className="text-sm text-slate-800 truncate">
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(p.id)}
+                    onChange={() => toggleSelect(p.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-4 h-4 rounded border-slate-300 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm text-slate-800 truncate min-w-0">
                       {p.description}
                       {counterparty && (
                         <>
@@ -6700,28 +6700,32 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                       {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-400 truncate">
+                </div>
+                <div className="flex items-end justify-between gap-2 mt-1 pl-[26px]">
+                  <p className="text-[11px] text-slate-400 truncate min-w-0">
                     {entity?.name} · {p.date} · {p.source}
                     {p.volgnummer && <> · volgnr <span className="font-mono">{p.volgnummer}</span></>}
                     {category && <> · {category.name}</>}
                     {project && <> · {project.name}</>}
                   </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenRecurringDraft(p); }}
+                      className="text-[10px] text-slate-400 underline decoration-dotted"
+                    >
+                      herhalende post
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
+                      className="text-[10px] text-rose-400 underline decoration-dotted"
+                    >
+                      verwijder
+                    </button>
+                    <span className={`text-sm font-medium ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
+                      {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
+                    </span>
+                  </div>
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onOpenRecurringDraft(p); }}
-                  className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
-                >
-                  herhalende post
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
-                  className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
-                >
-                  verwijder
-                </button>
-                <span className={`text-sm font-medium shrink-0 ${p.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
-                  {p.direction === "in" ? "+" : "−"}{eur(p.amount)}
-                </span>
               </div>
             );
           })}
