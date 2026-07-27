@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.64.3";
+const APP_VERSION = "1.64.4";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -6468,48 +6468,50 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
 
   return (
     <div className="mt-4 space-y-3">
-      <p className="text-xs text-slate-400">Alle betalingen uit de Betalingen-tabel, ongeacht of ze aan een document gekoppeld zijn.</p>
+      <div className="sticky top-0 z-20 bg-[#F4F6F5] pt-1 pb-2 -mx-1 px-1 space-y-3">
+        <p className="text-xs text-slate-400">Alle betalingen uit de Betalingen-tabel, ongeacht of ze aan een document gekoppeld zijn.</p>
 
-      <input
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="Zoek op omschrijving, crediteur, mededeling, referentie of volgnummer…"
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
-      />
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Zoek op omschrijving, crediteur, mededeling, referentie of volgnummer…"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400 bg-white"
+        />
 
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setStatusFilter(f.key)}
-            className={`shrink-0 px-2.5 py-1.5 rounded-full text-xs border transition ${
-              statusFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"
-            }`}
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setStatusFilter(f.key)}
+              className={`shrink-0 px-2.5 py-1.5 rounded-full text-xs border transition ${
+                statusFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200"
+              }`}
+            >
+              {f.label} ({counts[f.key]})
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <select
+            value={paySortField}
+            onChange={(e) => setPaySortField(e.target.value)}
+            className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
           >
-            {f.label} ({counts[f.key]})
+            <option value="date">Sorteer op datum</option>
+            <option value="amount">Sorteer op bedrag</option>
+            <option value="description">Sorteer op omschrijving</option>
+            <option value="volgnummer">Sorteer op volgnummer</option>
+          </select>
+          <button
+            onClick={() => setPaySortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="flex items-center gap-1 text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+            title={paySortDir === "asc" ? "Oplopend — klik voor aflopend" : "Aflopend — klik voor oplopend"}
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {paySortDir === "asc" ? "Oplopend" : "Aflopend"}
           </button>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-1.5">
-        <select
-          value={paySortField}
-          onChange={(e) => setPaySortField(e.target.value)}
-          className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
-        >
-          <option value="date">Sorteer op datum</option>
-          <option value="amount">Sorteer op bedrag</option>
-          <option value="description">Sorteer op omschrijving</option>
-          <option value="volgnummer">Sorteer op volgnummer</option>
-        </select>
-        <button
-          onClick={() => setPaySortDir((d) => (d === "asc" ? "desc" : "asc"))}
-          className="flex items-center gap-1 text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
-          title={paySortDir === "asc" ? "Oplopend — klik voor aflopend" : "Aflopend — klik voor oplopend"}
-        >
-          <ArrowUpDown className="w-3 h-3" />
-          {paySortDir === "asc" ? "Oplopend" : "Aflopend"}
-        </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
