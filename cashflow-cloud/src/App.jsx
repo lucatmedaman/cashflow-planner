@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.64.0";
+const APP_VERSION = "1.64.1";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -6392,6 +6392,11 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCounterparty, setBulkCounterparty] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  // Zelfde instelbare-sortering-patroon als "Ongekoppelde documenten"/
+  // "Ongekoppelde betalingen" in Koppelen — was hier voorheen een vaste
+  // datum+volgnummer-combinatie, nu net als daar zelf te kiezen.
+  const [paySortField, setPaySortField] = useState("date"); // date | amount | description | volgnummer
+  const [paySortDir, setPaySortDir] = useState("desc"); // asc | desc
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -6411,15 +6416,17 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   const filtered = scoped
     .filter((p) => statusFilter === "all" || (statusFilter === "nocp" ? !p.counterpartyId : statusOf(p) === statusFilter))
     .sort((a, b) => {
-      // Datum aflopend als hoofdsleutel, zodat rijen zonder volgnummer
-      // (PocketSmith e.d.) op hun eigen datum blijven staan i.p.v.
-      // achteraan de lijst te belanden. Binnen dezelfde datum: volgnummer
-      // aflopend, en lege volgnummers als laatste van die datumgroep.
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      if (a.volgnummer && b.volgnummer) return a.volgnummer < b.volgnummer ? 1 : a.volgnummer > b.volgnummer ? -1 : 0;
-      if (a.volgnummer) return -1;
-      if (b.volgnummer) return 1;
-      return 0;
+      let cmp;
+      if (paySortField === "amount") cmp = a.amount - b.amount;
+      else if (paySortField === "description") cmp = a.description.localeCompare(b.description);
+      else if (paySortField === "volgnummer") {
+        // Lege volgnummers altijd achteraan, ongeacht richting.
+        if (!a.volgnummer && !b.volgnummer) cmp = 0;
+        else if (!a.volgnummer) return 1;
+        else if (!b.volgnummer) return -1;
+        else cmp = a.volgnummer < b.volgnummer ? -1 : a.volgnummer > b.volgnummer ? 1 : 0;
+      } else cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+      return paySortDir === "asc" ? cmp : -cmp;
     });
 
   const counts = {
@@ -6456,6 +6463,27 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
             {f.label} ({counts[f.key]})
           </button>
         ))}
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <select
+          value={paySortField}
+          onChange={(e) => setPaySortField(e.target.value)}
+          className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
+        >
+          <option value="date">Sorteer op datum</option>
+          <option value="amount">Sorteer op bedrag</option>
+          <option value="description">Sorteer op omschrijving</option>
+          <option value="volgnummer">Sorteer op volgnummer</option>
+        </select>
+        <button
+          onClick={() => setPaySortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          className="flex items-center gap-1 text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+          title={paySortDir === "asc" ? "Oplopend — klik voor aflopend" : "Aflopend — klik voor oplopend"}
+        >
+          <ArrowUpDown className="w-3 h-3" />
+          {paySortDir === "asc" ? "Oplopend" : "Aflopend"}
+        </button>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
