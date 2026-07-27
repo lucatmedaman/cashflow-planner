@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.64.1";
+const APP_VERSION = "1.64.2";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -6397,6 +6397,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   // datum+volgnummer-combinatie, nu net als daar zelf te kiezen.
   const [paySortField, setPaySortField] = useState("date"); // date | amount | description | volgnummer
   const [paySortDir, setPaySortDir] = useState("desc"); // asc | desc
+  const [searchQuery, setSearchQuery] = useState("");
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -6413,8 +6414,20 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   }
 
   const scoped = payments.filter((p) => filteredEntityIds.includes(p.entityId));
+  const query = searchQuery.trim().toLowerCase();
   const filtered = scoped
     .filter((p) => statusFilter === "all" || (statusFilter === "nocp" ? !p.counterpartyId : statusOf(p) === statusFilter))
+    .filter((p) => {
+      if (!query) return true;
+      const cp = p.counterpartyId ? counterpartyById[p.counterpartyId] : null;
+      return (
+        p.description.toLowerCase().includes(query) ||
+        (cp?.name || "").toLowerCase().includes(query) ||
+        (p.bankRef || "").toLowerCase().includes(query) ||
+        (p.volgnummer || "").toLowerCase().includes(query) ||
+        (p.raw?.remittance || "").toLowerCase().includes(query)
+      );
+    })
     .sort((a, b) => {
       let cmp;
       if (paySortField === "amount") cmp = a.amount - b.amount;
@@ -6450,6 +6463,13 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   return (
     <div className="mt-4 space-y-3">
       <p className="text-xs text-slate-400">Alle betalingen uit de Betalingen-tabel, ongeacht of ze aan een document gekoppeld zijn.</p>
+
+      <input
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        placeholder="Zoek op omschrijving, crediteur, mededeling, referentie of volgnummer…"
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
+      />
 
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
