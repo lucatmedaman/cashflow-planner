@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.0";
+const APP_VERSION = "1.65.1";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -1742,7 +1742,16 @@ export default function CashflowPlanner() {
   // groep als geheel). Berekend hier al, ver vóór het eerste gebruik
   // (grandTotal), want const-declaraties in dit component worden niet
   // gehoist.
-  const internalTransferCategoryId = categories.find((c) => c.name === "Interne overschrijving")?.id || null;
+  // Categorieën die per boekhouding gewoon meetellen (echte cashflow voor
+  // die ene boekhouding), maar uit de GECOMBINEERDE ("Alle boekhoudingen")
+  // cijfers gesloten worden omdat ze daar vertekenen: interne
+  // overschrijvingen tussen eigen boekhoudingen (dubbeltelling) en
+  // kas/contant-verrichtingen (eigen geld dat van vorm verandert, geen
+  // externe uitgave/inkomst).
+  const COMBINED_EXCLUDED_CATEGORY_NAMES = ["Interne overschrijving", "Kas/Contant"];
+  const combinedExcludedCategoryIds = categories
+    .filter((c) => COMBINED_EXCLUDED_CATEGORY_NAMES.includes(c.name))
+    .map((c) => c.id);
 
   const reportTotals = useMemo(() => {
     return reportEntities.map((e) => {
@@ -1760,13 +1769,13 @@ export default function CashflowPlanner() {
   const grandTotal = useMemo(() => {
     let inSum = 0, uitSum = 0;
     allOccurrenceRows
-      .filter((r) => !r.paid && r.date >= todayISO() && r.item.categoryId !== internalTransferCategoryId)
+      .filter((r) => !r.paid && r.date >= todayISO() && !combinedExcludedCategoryIds.includes(r.item.categoryId))
       .forEach((r) => {
         if (r.item.direction === "in") inSum += Number(r.item.amount);
         else uitSum += Number(r.item.amount);
       });
     return { inSum, uitSum, net: inSum - uitSum };
-  }, [allOccurrenceRows, internalTransferCategoryId]);
+  }, [allOccurrenceRows, combinedExcludedCategoryIds]);
 
   // ---- counterparties (debiteuren/crediteuren) — kept as a separate normalized list
   // so it can later be split into its own file/table without restructuring anything else.
@@ -2591,7 +2600,7 @@ export default function CashflowPlanner() {
     sortedEntities.forEach((e) => { entityStartDates[e.id] = startDateFor(e); });
 
     const combinedRows = allUpcomingRows
-      .filter((r) => r.item.categoryId !== internalTransferCategoryId)
+      .filter((r) => !combinedExcludedCategoryIds.includes(r.item.categoryId))
       .map((r) => ({ ...r, date: projectedPayDate(r) }))
       .filter((r) => r.date >= (entityStartDates[r.item.entityId] || todayISO()))
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -2604,7 +2613,7 @@ export default function CashflowPlanner() {
     });
 
     return { perEntity, combinedOpening, combinedLedger, combinedEnding: combinedBalance };
-  }, [sortedEntities, entities, allUpcomingRows, internalTransferCategoryId]);
+  }, [sortedEntities, entities, allUpcomingRows, combinedExcludedCategoryIds]);
 
   if (loading) {
     return (
