@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.63.2";
+const APP_VERSION = "1.64.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -2215,6 +2215,21 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Bulk-variant: wijst dezelfde crediteur toe aan een geselecteerde reeks
+  // betalingen ineens — voor het opruimen van bv. "Zonder crediteur" in
+  // groep, i.p.v. één voor één via het detailscherm.
+  async function bulkAssignCounterparty(paymentIds, counterpartyId) {
+    try {
+      for (const id of paymentIds) {
+        await atUpdate(TABLES.payments, [{ id, fields: { DebiteurCrediteur: counterpartyId ? [counterpartyId] : [] } }]);
+      }
+      setPayments((prev) => prev.map((p) => (paymentIds.includes(p.id) ? { ...p, counterpartyId } : p)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   // Directe "Samenvoegen met…"-actie in Crediteuren: verhuist zowel posten
   // als betalingen (Naammapping deed voorheen enkel posten) van sourceId
   // naar targetId, en verwijdert de bronrecord nadien.
@@ -3067,12 +3082,15 @@ export default function CashflowPlanner() {
             payments={payments}
             entityById={entityById}
             counterpartyById={counterpartyById}
+            counterparties={counterparties}
             filteredEntityIds={filteredEntityIds}
             categories={categories}
             projects={projects}
             onOpenDetail={openDetail}
             onDeletePayment={deletePayment}
             onCounterpartyClick={goToCounterparty}
+            onResolveCounterparty={resolveCounterpartyId}
+            onBulkAssignCounterparty={bulkAssignCounterparty}
             onOpenRecurringDraft={(payment) =>
               setRecurringDraft({
                 payment,
@@ -6369,8 +6387,19 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 // betalingen met "geen document nodig", die in het Koppelen-scherm nergens
 // verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
 // vallen.
-function BetalingenView({ payments, entityById, counterpartyById, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft }) {
+function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkCounterparty, setBulkCounterparty] = useState("");
+  const [bulkAssigning, setBulkAssigning] = useState(false);
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
   function statusOf(p) {
     if ((p.documentIds || []).length > 0) return "linked";
@@ -6435,6 +6464,54 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
         <SummaryCard label="Totaal uit" value={totalUit} tone="neg" />
       </div>
 
+      {filtered.length > 0 && (
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <input
+              type="checkbox"
+              checked={filtered.length > 0 && filtered.every((p) => selectedIds.has(p.id))}
+              onChange={(e) =>
+                setSelectedIds(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set())
+              }
+              className="w-3.5 h-3.5 rounded border-slate-300"
+            />
+            Alles selecteren ({filtered.length})
+          </label>
+          {selectedIds.size > 0 && <span className="text-[11px] text-slate-400">{selectedIds.size} geselecteerd</span>}
+        </div>
+      )}
+
+      {selectedIds.size > 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center gap-2">
+          <CounterpartyAutocomplete
+            value={bulkCounterparty}
+            onChange={setBulkCounterparty}
+            counterparties={counterparties || []}
+            placeholder="Debiteur/crediteur toewijzen aan selectie…"
+            className="flex-1"
+            inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+          />
+          <button
+            onClick={async () => {
+              if (!bulkCounterparty.trim()) return;
+              setBulkAssigning(true);
+              const counterpartyId = await onResolveCounterparty(bulkCounterparty.trim());
+              await onBulkAssignCounterparty([...selectedIds], counterpartyId);
+              setBulkAssigning(false);
+              setBulkCounterparty("");
+              setSelectedIds(new Set());
+            }}
+            disabled={!bulkCounterparty.trim() || bulkAssigning}
+            className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 shrink-0 disabled:opacity-40"
+          >
+            {bulkAssigning ? "Bezig…" : `Toewijzen aan ${selectedIds.size}`}
+          </button>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 shrink-0">
+            Annuleer
+          </button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-10">Geen betalingen in deze selectie.</p>
       ) : (
@@ -6451,6 +6528,13 @@ function BetalingenView({ payments, entityById, counterpartyById, filteredEntity
                 onClick={() => onOpenDetail("payment", p.id)}
                 className="flex items-center gap-2.5 px-3.5 py-2.5 cursor-pointer hover:bg-slate-50"
               >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(p.id)}
+                  onChange={() => toggleSelect(p.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-4 h-4 rounded border-slate-300 shrink-0"
+                />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <p className="text-sm text-slate-800 truncate">
