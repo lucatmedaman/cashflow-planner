@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.63.1";
+const APP_VERSION = "1.63.2";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -4281,10 +4281,15 @@ function KoppelenView({
   // en soms net het duurste of een specifieke naam.
   const [docSortField, setDocSortField] = useState("dueDate"); // dueDate | amount | description
   const [docSortDir, setDocSortDir] = useState("asc"); // asc | desc
+  const [paySortField, setPaySortField] = useState("date"); // date | description
+  const [paySortDir, setPaySortDir] = useState("desc"); // asc | desc
 
   const unlinkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => {
+      const cmp = paySortField === "description" ? a.description.localeCompare(b.description) : (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+      return paySortDir === "asc" ? cmp : -cmp;
+    });
 
   const unlinkedDocs = items
     .filter((it) =>
@@ -4357,6 +4362,25 @@ function KoppelenView({
             + Nieuwe betaling
           </span>
         </button>
+
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <select
+            value={paySortField}
+            onChange={(e) => setPaySortField(e.target.value)}
+            className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
+          >
+            <option value="date">Sorteer op datum</option>
+            <option value="description">Sorteer op omschrijving</option>
+          </select>
+          <button
+            onClick={() => setPaySortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="flex items-center gap-1 text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600"
+            title={paySortDir === "asc" ? "Oplopend — klik voor aflopend" : "Aflopend — klik voor oplopend"}
+          >
+            <ArrowUpDown className="w-3 h-3" />
+            {paySortDir === "asc" ? "Oplopend" : "Aflopend"}
+          </button>
+        </div>
 
         {showNewPayment && (
           <div className="bg-white border border-slate-200 rounded-xl p-3 mb-2 space-y-2">
