@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.1";
+const APP_VERSION = "1.65.2";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -2698,7 +2698,7 @@ export default function CashflowPlanner() {
             ) : null}
           </div>
 
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
               onClick={exportData}
               className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600"
@@ -5204,9 +5204,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 
   const mappingBar = (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-slate-400">Alle posten per debiteur/crediteur, ongeacht betaalstatus</p>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             onClick={() => setShowUnused((s) => !s)}
             className={`text-xs px-2.5 py-1.5 rounded-full border ${
