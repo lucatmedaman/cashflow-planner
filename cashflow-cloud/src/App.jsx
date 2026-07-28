@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.5";
+const APP_VERSION = "1.65.6";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -1313,6 +1313,7 @@ export default function CashflowPlanner() {
   // ontkoppeld (paidDates op de gekoppelde documenten opgeschoond) voor de
   // betaling zelf verdwijnt — zelfde opruimlogica als unlinkPaymentFromDocument.
   async function deletePayment(payment) {
+    if (!window.confirm(`Betaling "${payment.description}" (${eur(payment.amount)}) verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
     try {
       let working = payment;
       for (const docId of payment.documentIds || []) {
@@ -3727,7 +3728,10 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         <button onClick={() => onDuplicate(row.item)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Dupliceren">
           <Copy className="w-3.5 h-3.5" />
         </button>
-        <button onClick={() => onDelete(row.itemId)} className="p-1 text-[#C7CCC9] hover:text-[#B3462C]">
+        <button
+          onClick={() => onDelete(row.itemId)}
+          className="p-1 text-[#C7CCC9] hover:text-[#B3462C]"
+        >
           <Trash2 className="w-3.5 h-3.5" />
         </button>
       </div>
