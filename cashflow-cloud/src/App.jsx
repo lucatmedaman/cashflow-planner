@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.7";
+const APP_VERSION = "1.66.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -260,6 +260,7 @@ function counterpartyFromRecord(r) {
     accountNumber: r.fields.Rekeningnummer || "",
     address: r.fields.Adres || "",
     priority: r.fields.Prioriteit || "",
+    noDocDefault: !!r.fields.StandaardGeenDocumentNodig,
   };
 }
 
@@ -1001,6 +1002,12 @@ export default function CashflowPlanner() {
         } else if (entry.counterpartyName) {
           counterpartyId = await resolveCounterpartyId(entry.counterpartyName);
         }
+        // Crediteur-instelling "standaard geen document nodig": enkel
+        // relevant als er geen matchedItem is (dan is er sowieso al een
+        // gekoppeld document, "geen document nodig" is dan moot).
+        const noDocByDefault = !matchedItem && counterpartyId
+          ? !!counterpartiesRef.current.find((c) => c.id === counterpartyId)?.noDocDefault
+          : false;
 
         const snapshot = { ...entry, wasCreated: !matchedItem };
         const paymentFields = paymentToFields({
@@ -1017,7 +1024,7 @@ export default function CashflowPlanner() {
           projectId: null,
           counterpartyId,
           documentIds: matchedItem ? [matchedItem.id] : [],
-          noDocumentNeeded: false,
+          noDocumentNeeded: noDocByDefault,
         });
         const [paymentRec] = await atCreate(TABLES.payments, [{ fields: paymentFields }]);
         let newPayment = paymentFromRecord(paymentRec);
@@ -1283,6 +1290,7 @@ export default function CashflowPlanner() {
 
   async function addManualPayment(draft) {
     try {
+      const cp = draft.counterpartyId ? counterpartiesRef.current.find((c) => c.id === draft.counterpartyId) : null;
       const fields = paymentToFields({
         description: draft.description || "Handmatige betaling",
         date: draft.date,
@@ -1296,7 +1304,7 @@ export default function CashflowPlanner() {
         projectId: draft.projectId || null,
         counterpartyId: draft.counterpartyId || null,
         documentIds: [],
-        noDocumentNeeded: false,
+        noDocumentNeeded: !!cp?.noDocDefault,
       });
       const [rec] = await atCreate(TABLES.payments, [{ fields }]);
       const created = paymentFromRecord(rec);
@@ -2237,6 +2245,15 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
+  async function toggleCounterpartyNoDocDefault(id, next) {
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, noDocDefault: next } : c)));
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { StandaardGeenDocumentNodig: next } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
 
   // Wijst een debiteur/crediteur toe aan een bestaande Betaling — nodig
   // omdat het "+ Nieuwe betaling"-formulier dit al kon instellen bij
@@ -3091,6 +3108,7 @@ export default function CashflowPlanner() {
             onUpdateFieldLocal={updateCounterpartyFieldLocal}
             onCommitField={commitCounterpartyField}
             onToggleTrust={toggleCounterpartyTrust}
+            onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
             onMergeCounterparties={mergeCounterparties}
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
             unusedCounterparties={unusedCounterparties}
@@ -5147,7 +5165,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onToggleNoDocDefault, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [mergingFor, setMergingFor] = useState(null);
@@ -5610,6 +5628,15 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         className="w-4 h-4 rounded border-slate-300"
                       />
                       Automatisch document aanmaken bij bank-import (vertrouwde crediteur)
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
+                      <input
+                        type="checkbox"
+                        checked={!!counterparty.noDocDefault}
+                        onChange={(e) => onToggleNoDocDefault(counterparty.id, e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300"
+                      />
+                      Nieuwe betalingen van deze crediteur zijn standaard "geen document nodig"
                     </label>
                   </div>
                 )}
