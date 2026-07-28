@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.4";
+const APP_VERSION = "1.65.5";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -3607,7 +3607,8 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
     <>
     <div className={`flex items-stretch bg-white border rounded-lg overflow-hidden ${overdue ? "border-[#E9C7B9]" : "border-[#E3E7E4]"}`}>
       <div className="w-[3px] shrink-0" style={{ background: c.dot }} />
-      <div className="flex items-center gap-2.5 px-3 py-2.5 flex-1 min-w-0">
+      <div className="flex-1 min-w-0 px-3 py-2.5">
+      <div className="flex items-center gap-2.5">
       <button
         onClick={() => onTogglePaid(row.itemId, row.date)}
         className={`shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition ${
@@ -3703,8 +3704,9 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
           {isIn ? "+" : "−"}{eur(row.item.amount)}
         </p>
       </div>
+      </div>
 
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex items-center justify-end gap-0.5 mt-1">
         {onOpenDetail && (
           <button onClick={() => onOpenDetail("item", row.itemId)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Alle details bekijken">
             <Eye className="w-3.5 h-3.5" />
