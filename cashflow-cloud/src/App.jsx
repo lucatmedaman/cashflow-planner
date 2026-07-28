@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.65.6";
+const APP_VERSION = "1.65.7";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -5891,7 +5891,11 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                       .map((p) => {
                         const entity = entityById[p.entityId];
                         const isIn = p.direction === "in";
-                        const status = (p.documentIds || []).length > 0 ? "linked" : p.noDocumentNeeded ? "nodoc" : "unlinked";
+                        // Weergave-only: in dit paneel (crediteuren zonder enkele post) tonen
+                        // we een niet-gekoppelde betaling standaard als "geen document nodig"
+                        // i.p.v. "ongekoppeld" — dit raakt niet het echte GeenDocumentNodig-veld,
+                        // dus in Betalingen/Koppelen telt zo'n betaling nog gewoon als ongekoppeld.
+                        const status = (p.documentIds || []).length > 0 ? "linked" : "nodoc";
                         return (
                           <div
                             key={p.id}
