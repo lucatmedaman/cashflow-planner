@@ -292,6 +292,7 @@ export default async function handler(req, res) {
         // aangemaakt), anders wordt de (opgeschoonde) banknaam herkend of
         // aangemaakt.
         let counterpartyId = null;
+        let noDocByDefault = false;
         const targetCounterpartyId = target ? (target.fields.DebiteurCrediteur || [])[0] : null;
         if (targetCounterpartyId) {
           counterpartyId = targetCounterpartyId;
@@ -299,6 +300,10 @@ export default async function handler(req, res) {
           const existing = counterparties.find((c) => (c.fields.Naam || "").toLowerCase() === payee.toLowerCase());
           if (existing) {
             counterpartyId = existing.id;
+            // Enkel relevant zonder documentmatch — met een match is er
+            // sowieso al een gekoppeld document, "geen document nodig" is
+            // dan moot.
+            noDocByDefault = !target && !!existing.fields.StandaardGeenDocumentNodig;
           } else {
             counterpartyId = await resolveCounterpartyId(payee, counterparties);
           }
@@ -320,7 +325,7 @@ export default async function handler(req, res) {
           RuweBrongegevens: JSON.stringify(snapshot),
           DebiteurCrediteur: counterpartyId ? [counterpartyId] : [],
           GekoppeldeDocumenten: target ? [target.id] : [],
-          GeenDocumentNodig: false,
+          GeenDocumentNodig: noDocByDefault,
         };
         const paymentRec = await atCreate(TABLES.payments, paymentFields);
 
