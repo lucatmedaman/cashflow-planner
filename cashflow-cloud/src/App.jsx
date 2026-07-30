@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.66.0";
+const APP_VERSION = "1.67.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -621,6 +621,7 @@ export default function CashflowPlanner() {
   const [sendResult, setSendResult] = useState(null); // {ok, message}
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showBilltoboxRecent, setShowBilltoboxRecent] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
   // scherm (Planning, Crediteuren, Koppelen) geopend worden om alle velden
   // van één post of betaling te bekijken, met doorklikbare koppelingen.
@@ -641,6 +642,23 @@ export default function CashflowPlanner() {
   const exportPayload = useMemo(
     () => JSON.stringify({ entities, items, counterparties }, null, 2),
     [entities, items, counterparties]
+  );
+
+  // Meest recent via Billtobox geïmporteerde posten — gesorteerd op
+  // factuurdatum (nieuwste eerst), met vervaldatum als tiebreaker. Airtable's
+  // eigen created-time wordt niet lokaal bijgehouden, dus dit is de beste
+  // beschikbare proxy voor "recent geïmporteerd".
+  const billtoboxRecentItems = useMemo(
+    () =>
+      items
+        .filter((it) => it.source === "Billtobox")
+        .sort((a, b) => {
+          const ad = a.invoiceDate || a.dueDate || "";
+          const bd = b.invoiceDate || b.dueDate || "";
+          return bd < ad ? -1 : bd > ad ? 1 : 0;
+        })
+        .slice(0, 25),
+    [items]
   );
 
   function markSynced() {
@@ -2774,6 +2792,15 @@ export default function CashflowPlanner() {
                   {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" /> : <RefreshCw className="w-3.5 h-3.5 text-slate-400" />}
                   PocketSmith syncen
                 </button>
+                <div className="border-t border-slate-100 my-1" />
+                <button
+                  onClick={() => { setShowBilltoboxRecent(true); setShowActionsMenu(false); }}
+                  title="Toont de meest recent via Billtobox geïmporteerde facturen"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                  Recente Billtobox-facturen{billtoboxRecentItems.length > 0 ? ` (${billtoboxRecentItems.length})` : ""}
+                </button>
               </div>
             )}
             <input
@@ -3326,6 +3353,48 @@ export default function CashflowPlanner() {
               Sluiten
             </button>
             {copyMsg && <p className="text-xs text-slate-500 mt-2">{copyMsg}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Recente Billtobox-facturen modal */}
+      {showBilltoboxRecent && (
+        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-30" onClick={() => setShowBilltoboxRecent(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[32rem] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-medium text-slate-900 flex items-center gap-2"><FileText className="w-4 h-4" /> Recente Billtobox-facturen</h3>
+              <button onClick={() => setShowBilltoboxRecent(false)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Laatste {billtoboxRecentItems.length} posten met Bron = Billtobox, gesorteerd op factuurdatum. Tik op een rij voor details.
+            </p>
+            <div className="flex-1 overflow-y-auto -mx-1 px-1">
+              {billtoboxRecentItems.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">Geen Billtobox-facturen gevonden.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {billtoboxRecentItems.map((it) => (
+                    <button
+                      key={it.id}
+                      onClick={() => { setShowBilltoboxRecent(false); openDetail("item", it.id); }}
+                      className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-slate-50 px-1 rounded-lg"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-slate-800 truncate">{it.description || "(geen omschrijving)"}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {entityById[it.entityId]?.name || "?"}
+                          {it.invoiceDate ? ` · factuurdatum ${new Date(it.invoiceDate).toLocaleDateString("nl-BE")}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-sm font-num text-slate-700 shrink-0">{eur(it.amount)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowBilltoboxRecent(false)} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm shrink-0">
+              Sluiten
+            </button>
           </div>
         </div>
       )}
