@@ -10,6 +10,7 @@ export const TABLES = {
   payments: "tblmh8pKgQVlZLO2j", // Betalingen
   categories: "tblo7GAlHqh767fuk", // Categorieën
   projects: "tblr58NYZuYrsIXXH", // Projecten
+  actionLog: "tbltUr8SdtKKQ89RH", // ActieLog — datum/tijdstip van sync- en importacties
 };
 
 const API_ROOT = "/api/airtable";
