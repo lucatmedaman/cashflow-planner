@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.68.0";
+const APP_VERSION = "1.69.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -547,6 +547,12 @@ export default function CashflowPlanner() {
   const [payments, setPayments] = useState([]);
   const [categories, setCategories] = useState([]);
   const [projects, setProjects] = useState([]);
+  // Logboek van sync-/importacties (PocketSmith-sync, Bank-import,
+  // UBL/PDF-inlezen, JSON-import) — voor "laatst uitgevoerd op"-weergave in
+  // het Acties-menu. Persistent in Airtable (TABLES.actionLog), niet enkel
+  // in-memory, zodat het ook na een pagina-herlaad of op een ander toestel
+  // klopt.
+  const [actionLog, setActionLog] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [airtableError, setAirtableError] = useState("");
@@ -668,6 +674,27 @@ export default function CashflowPlanner() {
     setTimeout(() => setSyncToast(false), 2000);
   }
 
+  // Legt datum + tijdstip van een sync-/importactie vast in Airtable
+  // (TABLES.actionLog), zodat "laatst uitgevoerd op" persistent zichtbaar is
+  // in het Acties-menu. Faalt bewust stil (console.warn) — een mislukte
+  // logregel mag de eigenlijke actie (die al gelukt is op het moment dat dit
+  // aangeroepen wordt) niet alsnog laten falen richting de gebruiker.
+  async function logAction(actie, entityId, details) {
+    const tijdstip = new Date().toISOString();
+    try {
+      const fields = { Actie: actie, Tijdstip: tijdstip };
+      if (entityId) fields.Boekhouding = [entityId];
+      if (details) fields.Details = details;
+      const [rec] = await atCreate(TABLES.actionLog, [{ fields }]);
+      setActionLog((prev) => [
+        { id: rec.id, actie, tijdstip, entityId: entityId || null, details: details || "" },
+        ...prev,
+      ]);
+    } catch (err) {
+      console.warn("Actielog wegschrijven mislukt:", err.message);
+    }
+  }
+
   // Local cache mirror — used only as an offline fallback if Airtable is unreachable,
   // never as the source of truth once Airtable sync is active.
   useEffect(() => {
@@ -712,7 +739,7 @@ export default function CashflowPlanner() {
   }
 
   async function loadFromAirtable() {
-    const [entRecs, cpRecs, itemRecs, mapRecs, paymentRecs, catRecs, projRecs] = await Promise.all([
+    const [entRecs, cpRecs, itemRecs, mapRecs, paymentRecs, catRecs, projRecs, logRecs] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
@@ -720,6 +747,7 @@ export default function CashflowPlanner() {
       atListAll(TABLES.payments),
       atListAll(TABLES.categories),
       atListAll(TABLES.projects),
+      atListAll(TABLES.actionLog),
     ]);
     return {
       entities: entRecs.map(entityFromRecord),
@@ -734,6 +762,13 @@ export default function CashflowPlanner() {
       payments: paymentRecs.map(paymentFromRecord),
       categories: catRecs.map(categoryFromRecord),
       projects: projRecs.map(projectFromRecord),
+      actionLog: logRecs.map((r) => ({
+        id: r.id,
+        actie: r.fields.Actie || "",
+        tijdstip: r.fields.Tijdstip || "",
+        entityId: r.fields.Boekhouding?.[0] || null,
+        details: r.fields.Details || "",
+      })),
     };
   }
 
@@ -765,6 +800,7 @@ export default function CashflowPlanner() {
         setPayments(data.payments || []);
         setCategories(data.categories || []);
         setProjects(data.projects || []);
+        setActionLog(data.actionLog || []);
         setOfflineMode(false);
         setAirtableError("");
         markSynced();
@@ -800,6 +836,7 @@ export default function CashflowPlanner() {
       setPayments(data.payments || []);
       setCategories(data.categories || []);
       setProjects(data.projects || []);
+      setActionLog(data.actionLog || []);
       setOfflineMode(false);
       markSynced();
     } catch (err) {
@@ -857,7 +894,9 @@ export default function CashflowPlanner() {
         setPayments(data.payments || []);
         setCategories(data.categories || []);
         setProjects(data.projects || []);
+        setActionLog(data.actionLog || []);
         markSynced();
+        logAction("JSON-import", null, `${parsed.items?.length ?? "?"} posten, ${parsed.counterparties?.length ?? "?"} tegenpartijen`);
         setImportMsg("Geïmporteerd als nieuwe records in Airtable.");
       } catch (err) {
         setImportMsg(`Import mislukt: ${err.message}`);
@@ -918,6 +957,7 @@ export default function CashflowPlanner() {
           msg += ` PocketSmith-rekeningnamen: ${data.pocketsmithAccountNames.join(", ")}`;
         }
         setImportMsg(msg);
+        await logAction("PocketSmith-sync", null, msg);
         const reloaded = await loadFromAirtable();
         setEntities(reloaded.entities);
         setCounterparties(reloaded.counterparties);
@@ -926,6 +966,7 @@ export default function CashflowPlanner() {
         setPayments(reloaded.payments || []);
         setCategories(reloaded.categories || []);
         setProjects(reloaded.projects || []);
+        setActionLog(reloaded.actionLog || []);
         markSynced();
       }
     } catch (err) {
@@ -1100,6 +1141,7 @@ export default function CashflowPlanner() {
     setItems(workingItems);
     setPayments(workingPayments);
     markSynced();
+    logAction("Bank-import", bankEntityId, `${matched} gekoppeld, ${created} aangemaakt, ${proposed} wachten, ${skipped} overgeslagen, ${errors} fout(en) — van ${bankParsed.entries.length} verrichtingen.`);
     setBankResult({ matched, created, proposed, skipped, errors, errorDetails, volgnummersAangevuld, total: bankParsed.entries.length });
     setBankImporting(false);
   }
@@ -1621,6 +1663,25 @@ export default function CashflowPlanner() {
     ? accountBalances.reduce((latest, e) => (e.bankBalanceDate && e.bankBalanceDate > latest ? e.bankBalanceDate : latest), "")
     : null;
 
+  // Laatst uitgevoerd tijdstip per actietype, uit het persistente
+  // ActieLog (zie logAction). Simpele "hoogste Tijdstip per Actie"-reductie.
+  const lastRunByAction = useMemo(() => {
+    const map = {};
+    actionLog.forEach((entry) => {
+      if (!entry.actie || !entry.tijdstip) return;
+      if (!map[entry.actie] || entry.tijdstip > map[entry.actie]) map[entry.actie] = entry.tijdstip;
+    });
+    return map;
+  }, [actionLog]);
+  function formatActionTimestamp(iso) {
+    if (!iso) return null;
+    const d = new Date(iso);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return sameDay
+      ? `vandaag ${d.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}`
+      : `${d.toLocaleDateString("nl-BE")} ${d.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" })}`;
+  }
+
   // Meest recente verrichting per boekhouding, per bron — gebaseerd op de
   // transactiedatum zelf (bankSnapshot-datum indien bekend, anders de
   // vervaldatum van de post). Geen apart "laatst gesynchroniseerd"-tijdstip
@@ -2104,6 +2165,11 @@ export default function CashflowPlanner() {
         setItems((prev) => [...prev, created]);
       }
       markSynced();
+      logAction(
+        ublDraft.source === "PDF" ? "PDF-inlezen" : "UBL-inlezen",
+        ublDraft.entityId,
+        `${ublDraft.counterparty || "?"} — ${eur(ublDraft.amount)}`
+      );
 
       if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
         const entity = entities.find((en) => en.id === ublDraft.entityId);
@@ -2776,41 +2842,69 @@ export default function CashflowPlanner() {
                 <button
                   onClick={() => { triggerImport(); setShowActionsMenu(false); }}
                   title="Importeert als nieuwe records in Airtable"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
                 >
-                  <Upload className="w-3.5 h-3.5 text-slate-400" /> Importeer JSON
+                  <Upload className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                  <span className="flex-1 text-left">
+                    Importeer JSON
+                    {lastRunByAction["JSON-import"] && (
+                      <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["JSON-import"])}</span>
+                    )}
+                  </span>
                 </button>
                 <button
                   onClick={() => { openBankModal(); setShowActionsMenu(false); }}
                   title="Bankuittreksel inlezen (CAMT.053 XML of CSV-export) en matchen"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
                 >
-                  <Landmark className="w-3.5 h-3.5 text-slate-400" /> Bank importeren
+                  <Landmark className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                  <span className="flex-1 text-left">
+                    Bank importeren
+                    {lastRunByAction["Bank-import"] && (
+                      <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["Bank-import"])}</span>
+                    )}
+                  </span>
                 </button>
                 <button
                   onClick={() => { ublFileInputRef.current?.click(); setShowActionsMenu(false); }}
                   title="Eén UBL-factuur (.xml) rechtstreeks inlezen als post"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
                 >
-                  <FileText className="w-3.5 h-3.5 text-slate-400" /> UBL inlezen
+                  <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />
+                  <span className="flex-1 text-left">
+                    UBL inlezen
+                    {lastRunByAction["UBL-inlezen"] && (
+                      <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["UBL-inlezen"])}</span>
+                    )}
+                  </span>
                 </button>
                 <button
                   onClick={() => { pdfFileInputRef.current?.click(); setShowActionsMenu(false); }}
                   disabled={pdfParsing}
                   title="Een factuur als PDF inlezen als post — minder betrouwbaar dan UBL"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 >
-                  {pdfParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" /> : <FileText className="w-3.5 h-3.5 text-slate-400" />}
-                  PDF-factuur inlezen
+                  {pdfParsing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 mt-0.5 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
+                  <span className="flex-1 text-left">
+                    PDF-factuur inlezen
+                    {lastRunByAction["PDF-inlezen"] && (
+                      <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["PDF-inlezen"])}</span>
+                    )}
+                  </span>
                 </button>
                 <button
                   onClick={() => { triggerPocketsmithSync(); setShowActionsMenu(false); }}
                   disabled={pocketsmithSyncing}
                   title="Haalt nieuwe transacties op via PocketSmith en matcht/maakt posten aan"
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 >
-                  {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" /> : <RefreshCw className="w-3.5 h-3.5 text-slate-400" />}
-                  PocketSmith syncen
+                  {pocketsmithSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 mt-0.5 shrink-0" /> : <RefreshCw className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
+                  <span className="flex-1 text-left">
+                    PocketSmith syncen
+                    {lastRunByAction["PocketSmith-sync"] && (
+                      <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["PocketSmith-sync"])}</span>
+                    )}
+                  </span>
                 </button>
                 <div className="border-t border-slate-100 my-1" />
                 <button
