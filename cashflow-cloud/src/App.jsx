@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.67.0";
+const APP_VERSION = "1.68.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -622,6 +622,7 @@ export default function CashflowPlanner() {
   const [importMsg, setImportMsg] = useState("");
   const [showExportModal, setShowExportModal] = useState(false);
   const [showBilltoboxRecent, setShowBilltoboxRecent] = useState(false);
+  const [showAccountBalances, setShowAccountBalances] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
   // scherm (Planning, Crediteuren, Koppelen) geopend worden om alle velden
   // van één post of betaling te bekijken, met doorklikbare koppelingen.
@@ -1600,6 +1601,25 @@ export default function CashflowPlanner() {
     () => items.filter((i) => (i.source === "Bank-import" || i.source === "Billtobox") && !i.read).length,
     [items]
   );
+
+  // Rekeningsaldi per boekhouding met bekend banksaldo. BankSaldoDatum wordt
+  // bijgewerkt door zowel PocketSmith-sync als CAMT/CSV-bankimport — dit is
+  // dus het laatst gekende banksaldo, niet exclusief een PocketSmith-tijdstip
+  // (er is geen apart "laatste PocketSmith-sync"-veld in Airtable).
+  const accountBalances = useMemo(
+    () =>
+      sortedEntities
+        .filter((e) => e.bankBalance !== null && e.bankBalance !== undefined)
+        .sort((a, b) => {
+          const ad = a.bankBalanceDate || "";
+          const bd = b.bankBalanceDate || "";
+          return bd < ad ? -1 : bd > ad ? 1 : 0;
+        }),
+    [sortedEntities]
+  );
+  const lastKnownBalanceDate = accountBalances.length
+    ? accountBalances.reduce((latest, e) => (e.bankBalanceDate && e.bankBalanceDate > latest ? e.bankBalanceDate : latest), "")
+    : null;
 
   // Meest recente verrichting per boekhouding, per bron — gebaseerd op de
   // transactiedatum zelf (bankSnapshot-datum indien bekend, anders de
@@ -2801,6 +2821,14 @@ export default function CashflowPlanner() {
                   <FileText className="w-3.5 h-3.5 text-slate-400" />
                   Recente Billtobox-facturen{billtoboxRecentItems.length > 0 ? ` (${billtoboxRecentItems.length})` : ""}
                 </button>
+                <button
+                  onClick={() => { setShowAccountBalances(true); setShowActionsMenu(false); }}
+                  title="Laatst gekende rekeningsaldi (via PocketSmith-sync of bank-import) per boekhouding"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-slate-400" />
+                  Rekeningsaldi &amp; laatste sync
+                </button>
               </div>
             )}
             <input
@@ -3393,6 +3421,48 @@ export default function CashflowPlanner() {
               )}
             </div>
             <button onClick={() => setShowBilltoboxRecent(false)} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm shrink-0">
+              Sluiten
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Rekeningsaldi & laatste sync modal */}
+      {showAccountBalances && (
+        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-30" onClick={() => setShowAccountBalances(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[28rem] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-medium text-slate-900 flex items-center gap-2"><Landmark className="w-4 h-4" /> Rekeningsaldi &amp; laatste sync</h3>
+              <button onClick={() => setShowAccountBalances(false)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Laatst gekend banksaldo per boekhouding, bijgewerkt via PocketSmith-sync of bank-import (CAMT/CSV) — geen apart "PocketSmith-only"-tijdstip beschikbaar.
+              {lastKnownBalanceDate ? ` Meest recente update: ${new Date(lastKnownBalanceDate).toLocaleDateString("nl-BE")}.` : ""}
+            </p>
+            <div className="flex-1 overflow-y-auto -mx-1 px-1">
+              {accountBalances.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">Nog geen banksaldo bekend — sync via PocketSmith of importeer een bankuittreksel.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {accountBalances.map((e) => (
+                    <div key={e.id} className="flex items-center justify-between gap-3 py-2.5 px-1">
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: entityColor(e).dot }} />
+                        <div className="min-w-0">
+                          <p className="text-sm text-slate-800 truncate">{e.name}</p>
+                          <p className="text-[11px] text-slate-400">
+                            {e.bankBalanceDate ? new Date(e.bankBalanceDate).toLocaleDateString("nl-BE") : "geen datum bekend"}
+                            {e.pocketsmithAccount ? " · PocketSmith gekoppeld" : e.iban ? " · alleen IBAN gekoppeld" : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-num text-slate-700 shrink-0">{eur(e.bankBalance)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowAccountBalances(false)} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm shrink-0">
               Sluiten
             </button>
           </div>
