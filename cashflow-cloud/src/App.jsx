@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.69.0";
+const APP_VERSION = "1.70.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -1659,9 +1659,6 @@ export default function CashflowPlanner() {
         }),
     [sortedEntities]
   );
-  const lastKnownBalanceDate = accountBalances.length
-    ? accountBalances.reduce((latest, e) => (e.bankBalanceDate && e.bankBalanceDate > latest ? e.bankBalanceDate : latest), "")
-    : null;
 
   // Laatst uitgevoerd tijdstip per actietype, uit het persistente
   // ActieLog (zie logAction). Simpele "hoogste Tijdstip per Actie"-reductie.
@@ -1670,6 +1667,16 @@ export default function CashflowPlanner() {
     actionLog.forEach((entry) => {
       if (!entry.actie || !entry.tijdstip) return;
       if (!map[entry.actie] || entry.tijdstip > map[entry.actie]) map[entry.actie] = entry.tijdstip;
+    });
+    return map;
+  }, [actionLog]);
+  // Laatste Bank-import-tijdstip per boekhouding (Bank-import wordt per
+  // entiteit gelogd, in tegenstelling tot PocketSmith-sync dat globaal is).
+  const lastBankImportByEntity = useMemo(() => {
+    const map = {};
+    actionLog.forEach((entry) => {
+      if (entry.actie !== "Bank-import" || !entry.entityId || !entry.tijdstip) return;
+      if (!map[entry.entityId] || entry.tijdstip > map[entry.entityId]) map[entry.entityId] = entry.tijdstip;
     });
     return map;
   }, [actionLog]);
@@ -3530,8 +3537,9 @@ export default function CashflowPlanner() {
               <button onClick={() => setShowAccountBalances(false)}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <p className="text-xs text-slate-500 mb-2">
-              Laatst gekend banksaldo per boekhouding, bijgewerkt via PocketSmith-sync of bank-import (CAMT/CSV) — geen apart "PocketSmith-only"-tijdstip beschikbaar.
-              {lastKnownBalanceDate ? ` Meest recente update: ${new Date(lastKnownBalanceDate).toLocaleDateString("nl-BE")}.` : ""}
+              Laatst gekend banksaldo per boekhouding — "saldodatum" komt uit PocketSmith of het bankbestand zelf,
+              "sync-tijdstip" uit het actielog hieronder (wanneer de app dit effectief heeft opgehaald).
+              {lastRunByAction["PocketSmith-sync"] && ` Laatste PocketSmith-sync: ${formatActionTimestamp(lastRunByAction["PocketSmith-sync"])}.`}
             </p>
             <div className="flex-1 overflow-y-auto -mx-1 px-1">
               {accountBalances.length === 0 ? (
@@ -3545,9 +3553,14 @@ export default function CashflowPlanner() {
                         <div className="min-w-0">
                           <p className="text-sm text-slate-800 truncate">{e.name}</p>
                           <p className="text-[11px] text-slate-400">
-                            {e.bankBalanceDate ? new Date(e.bankBalanceDate).toLocaleDateString("nl-BE") : "geen datum bekend"}
+                            saldodatum: {e.bankBalanceDate ? new Date(e.bankBalanceDate).toLocaleDateString("nl-BE") : "onbekend"}
                             {e.pocketsmithAccount ? " · PocketSmith gekoppeld" : e.iban ? " · alleen IBAN gekoppeld" : ""}
                           </p>
+                          {lastBankImportByEntity[e.id] && (
+                            <p className="text-[11px] text-slate-400">
+                              laatste bank-import: {formatActionTimestamp(lastBankImportByEntity[e.id])}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <span className="text-sm font-num text-slate-700 shrink-0">{eur(e.bankBalance)}</span>
