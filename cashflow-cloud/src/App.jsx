@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.71.0";
+const APP_VERSION = "1.72.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -3864,7 +3864,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
   const paymentIds = row.item.paymentIds || [];
   const linkCandidates = (payments || [])
     .filter((p) => p.entityId === row.item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+    .sort((a, b) => a.amount - b.amount);
   const effPriority = row.item.priority || counterparty?.priority || "";
   const priorityInfo = priorityMeta(effPriority);
 
@@ -6037,7 +6037,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                       {linkingItemId === item.id && (() => {
                         const candidates = (payments || [])
                           .filter((p) => p.entityId === item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
-                          .sort((a, b) => (a.date < b.date ? 1 : -1));
+                          .sort((a, b) => a.amount - b.amount);
                         return (
                           <div className="px-3.5 pb-3.5 space-y-2">
                             {candidates.length === 0 ? (
@@ -6301,7 +6301,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                   {linkingItemId === item.id && (() => {
                     const candidates = (payments || [])
                       .filter((p) => p.entityId === item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
-                      .sort((a, b) => (a.date < b.date ? 1 : -1));
+                      .sort((a, b) => a.amount - b.amount);
                     return (
                       <div className="px-3.5 pb-3.5 space-y-2">
                         {candidates.length === 0 ? (
