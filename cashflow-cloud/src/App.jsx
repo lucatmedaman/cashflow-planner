@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.70.0";
+const APP_VERSION = "1.71.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -4620,13 +4620,16 @@ function KoppelenView({
   // en soms net het duurste of een specifieke naam.
   const [docSortField, setDocSortField] = useState("dueDate"); // dueDate | amount | description
   const [docSortDir, setDocSortDir] = useState("asc"); // asc | desc
-  const [paySortField, setPaySortField] = useState("date"); // date | description
+  const [paySortField, setPaySortField] = useState("date"); // date | amount | description
   const [paySortDir, setPaySortDir] = useState("desc"); // asc | desc
 
   const unlinkedPayments = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
     .sort((a, b) => {
-      const cmp = paySortField === "description" ? a.description.localeCompare(b.description) : (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+      let cmp;
+      if (paySortField === "amount") cmp = a.amount - b.amount;
+      else if (paySortField === "description") cmp = a.description.localeCompare(b.description);
+      else cmp = a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
       return paySortDir === "asc" ? cmp : -cmp;
     });
 
@@ -4709,6 +4712,7 @@ function KoppelenView({
             className="text-[11px] border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-600 outline-none focus:border-slate-400"
           >
             <option value="date">Sorteer op datum</option>
+            <option value="amount">Sorteer op bedrag</option>
             <option value="description">Sorteer op omschrijving</option>
           </select>
           <button
