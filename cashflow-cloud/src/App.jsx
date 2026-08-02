@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.72.0";
+const APP_VERSION = "1.73.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -3826,6 +3826,7 @@ export default function CashflowPlanner() {
           onEditItem={(item) => { startEdit(item); setView("planning"); setDetailTarget(null); }}
           onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
           onUnlinkPayment={unlinkPaymentFromDocument}
+          onLinkPayment={linkPaymentToDocument}
           onDeletePayment={async (payment) => { await deletePayment(payment); setDetailTarget(null); }}
           onResolveCounterparty={resolveCounterpartyId}
           onUpdatePaymentCounterparty={updatePaymentCounterparty}
@@ -6371,7 +6372,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onCreateDocFromPayment }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onCreateDocFromPayment }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -6394,7 +6395,15 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
   const [showCreateDoc, setShowCreateDoc] = useState(false);
   const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
   const [creatingDoc, setCreatingDoc] = useState(false);
+  const [showLinkDoc, setShowLinkDoc] = useState(false);
+  const [chosenDocId, setChosenDocId] = useState("");
+  const [linkingDoc, setLinkingDoc] = useState(false);
   const currentCounterparty = record.counterpartyId ? counterpartyById[record.counterpartyId] : null;
+  const linkDocCandidates = type === "payment"
+    ? (items || [])
+        .filter((i) => i.entityId === record.entityId && (i.paymentIds || []).length === 0)
+        .sort((a, b) => a.amount - b.amount)
+    : [];
 
   async function saveCounterparty() {
     const name = counterpartyInput.trim();
@@ -6667,10 +6676,16 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               <>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setShowCreateDoc((s) => !s); setDocDraft({ description: record.description, counterpartyName: currentCounterparty?.name || "" }); }}
+                    onClick={() => { setShowCreateDoc((s) => !s); setShowLinkDoc(false); setDocDraft({ description: record.description, counterpartyName: currentCounterparty?.name || "" }); }}
                     className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-700"
                   >
                     Maak document
+                  </button>
+                  <button
+                    onClick={() => { setShowLinkDoc((s) => !s); setShowCreateDoc(false); setChosenDocId(""); }}
+                    className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-700"
+                  >
+                    Koppel aan document
                   </button>
                   <button
                     onClick={() => onToggleNoDocNeeded(record)}
@@ -6679,6 +6694,46 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                     Geen document nodig
                   </button>
                 </div>
+                {showLinkDoc && (
+                  <div className="mt-2 space-y-2">
+                    {linkDocCandidates.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">Geen ongekoppelde documenten gevonden voor deze boekhouding.</p>
+                    ) : (
+                      <>
+                        <select
+                          value={chosenDocId}
+                          onChange={(e) => setChosenDocId(e.target.value)}
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                        >
+                          <option value="" disabled>Kies het juiste document…</option>
+                          {linkDocCandidates.map((i) => (
+                            <option key={i.id} value={i.id}>{i.description} — {eur(i.amount)} ({i.dueDate || i.date})</option>
+                          ))}
+                        </select>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              const doc = linkDocCandidates.find((i) => i.id === chosenDocId);
+                              if (!doc) return;
+                              setLinkingDoc(true);
+                              await onLinkPayment(record, doc);
+                              setLinkingDoc(false);
+                              setShowLinkDoc(false);
+                              setChosenDocId("");
+                            }}
+                            disabled={!chosenDocId || linkingDoc}
+                            className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                          >
+                            {linkingDoc ? "Bezig…" : "Bevestig koppeling"}
+                          </button>
+                          <button onClick={() => setShowLinkDoc(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                            Annuleer
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {showCreateDoc && (
                   <div className="mt-2 space-y-2">
                     <input
