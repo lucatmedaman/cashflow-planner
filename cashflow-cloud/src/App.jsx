@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.77.1";
+const APP_VERSION = "1.78.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -673,6 +673,7 @@ export default function CashflowPlanner() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [showBilltoboxRecent, setShowBilltoboxRecent] = useState(false);
   const [showAccountBalances, setShowAccountBalances] = useState(false);
+  const [showImportPeriods, setShowImportPeriods] = useState(false);
   // Detailscherm (pop-up): { type: "item" | "payment", id }. Kan vanuit elk
   // scherm (Planning, Crediteuren, Koppelen) geopend worden om alle velden
   // van één post of betaling te bekijken, met doorklikbare koppelingen.
@@ -1662,6 +1663,24 @@ export default function CashflowPlanner() {
         }),
     [sortedEntities]
   );
+
+  // Overzicht van de ingelezen periode per boekhouding: vroegste/laatste
+  // Betalingen-datum + aantal. Puur client-side uit reeds geladen `payments`
+  // — geen aparte API nodig, dit is dezelfde data als Betalingen/Koppelen.
+  const importPeriodsByEntity = useMemo(() => {
+    const map = {};
+    payments.forEach((p) => {
+      if (!p.date || !p.entityId) return;
+      const bucket = map[p.entityId] || { first: p.date, last: p.date, count: 0 };
+      if (p.date < bucket.first) bucket.first = p.date;
+      if (p.date > bucket.last) bucket.last = p.date;
+      bucket.count += 1;
+      map[p.entityId] = bucket;
+    });
+    return sortedEntities
+      .map((e) => ({ entity: e, period: map[e.id] || null }))
+      .filter((row) => row.period);
+  }, [payments, sortedEntities]);
 
   // Laatst uitgevoerd tijdstip per actietype, uit het persistente
   // ActieLog (zie logAction). Simpele "hoogste Tijdstip per Actie"-reductie.
@@ -2953,6 +2972,14 @@ export default function CashflowPlanner() {
                   <Landmark className="w-3.5 h-3.5 text-slate-400" />
                   Rekeningsaldi &amp; laatste sync
                 </button>
+                <button
+                  onClick={() => { setShowImportPeriods(true); setShowActionsMenu(false); }}
+                  title="Per boekhouding: eerste en laatste ingelezen transactiedatum uit Betalingen"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  <Landmark className="w-3.5 h-3.5 text-slate-400" />
+                  Ingelezen periodes
+                </button>
               </div>
             )}
             <input
@@ -3636,6 +3663,48 @@ export default function CashflowPlanner() {
               )}
             </div>
             <button onClick={() => setShowAccountBalances(false)} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm shrink-0">
+              Sluiten
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showImportPeriods && (
+        <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-30" onClick={() => setShowImportPeriods(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[28rem] max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-medium text-slate-900 flex items-center gap-2"><Landmark className="w-4 h-4" /> Ingelezen periodes</h3>
+              <button onClick={() => setShowImportPeriods(false)}><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-2">
+              Per boekhouding de vroegste en laatste datum van een Betaling die is ingelezen
+              (via bank-import, PocketSmith, of handmatig) — geeft aan welke periode al gedekt is.
+            </p>
+            <div className="flex-1 overflow-y-auto -mx-1 px-1">
+              {importPeriodsByEntity.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">Nog geen betalingen ingelezen.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {importPeriodsByEntity.map(({ entity, period }) => (
+                    <div key={entity.id} className="flex items-center justify-between gap-3 py-2.5 px-1">
+                      <div className="min-w-0 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: entityColor(entity).dot }} />
+                        <div className="min-w-0">
+                          <p className="text-sm text-slate-800 truncate">{entity.name}</p>
+                          <p className="text-[11px] text-slate-400">{period.count} betaling{period.count === 1 ? "" : "en"}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-num text-slate-700 shrink-0 text-right">
+                        {new Date(period.first).toLocaleDateString("nl-BE")}
+                        {" – "}
+                        {new Date(period.last).toLocaleDateString("nl-BE")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowImportPeriods(false)} className="w-full mt-3 py-2 rounded-lg border border-slate-200 text-sm shrink-0">
               Sluiten
             </button>
           </div>
