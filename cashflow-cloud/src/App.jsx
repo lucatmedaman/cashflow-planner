@@ -11,11 +11,10 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.75.0";
+const APP_VERSION = "1.76.0";
 const VIEW_LABELS = {
   planning: "Planning",
-  rapport: "Rapport",
-  grafiek: "Grafiek",
+  budget: "Budget",
   crediteuren: "Crediteuren",
   afpunten: "Afpunten",
   koppelen: "Koppelen",
@@ -599,7 +598,8 @@ export default function CashflowPlanner() {
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [syncToast, setSyncToast] = useState(false);
 
-  const [view, setView] = useState("planning"); // planning | rapport
+  const [view, setView] = useState("planning"); // planning | budget | crediteuren | ...
+  const [budgetTab, setBudgetTab] = useState("rapport"); // sub-tab binnen Budget: rapport | grafiek
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef(null);
   const [showEntityMenu, setShowEntityMenu] = useState(false);
@@ -3230,24 +3230,46 @@ export default function CashflowPlanner() {
               )}
             </div>
           </>
-        ) : view === "rapport" ? (
-          <ReportView
-            reportTotals={reportTotals}
-            grandTotal={grandTotal}
-            showGrand={reportEntities.length > 1}
-            entities={reportEntities}
-            runningBalances={runningBalances}
-            counterpartyById={counterpartyById}
-            paymentHistory={paymentHistory}
-            entityById={entityById}
-            onCounterpartyClick={goToCounterparty}
-          />
-        ) : view === "grafiek" ? (
-          <ChartView
-            runningBalances={runningBalances}
-            activeEntity={activeEntity}
-            entities={sortedEntities}
-          />
+        ) : view === "budget" ? (
+          <>
+            <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 mt-2 w-fit">
+              <button
+                onClick={() => setBudgetTab("rapport")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg ${
+                  budgetTab === "rapport" ? "bg-[#12181F] text-[#F4F6F5]" : "text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                Rapport
+              </button>
+              <button
+                onClick={() => setBudgetTab("grafiek")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg ${
+                  budgetTab === "grafiek" ? "bg-[#12181F] text-[#F4F6F5]" : "text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                Grafiek
+              </button>
+            </div>
+            {budgetTab === "rapport" ? (
+              <ReportView
+                reportTotals={reportTotals}
+                grandTotal={grandTotal}
+                showGrand={reportEntities.length > 1}
+                entities={reportEntities}
+                runningBalances={runningBalances}
+                counterpartyById={counterpartyById}
+                paymentHistory={paymentHistory}
+                entityById={entityById}
+                onCounterpartyClick={goToCounterparty}
+              />
+            ) : (
+              <ChartView
+                runningBalances={runningBalances}
+                activeEntity={activeEntity}
+                entities={sortedEntities}
+              />
+            )}
+          </>
         ) : view === "crediteuren" ? (
           <CounterpartyView
             items={items}
