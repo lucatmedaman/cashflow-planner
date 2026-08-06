@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.73.0";
+const APP_VERSION = "1.74.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -255,7 +255,6 @@ function counterpartyFromRecord(r) {
   return {
     id: r.id,
     name: r.fields.Naam || "",
-    autoCreateDoc: !!r.fields.AutomatischDocumentAanmaken,
     vatNumber: r.fields.BTWNummer || "",
     accountNumber: r.fields.Rekeningnummer || "",
     address: r.fields.Adres || "",
@@ -2347,15 +2346,6 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
-  async function toggleCounterpartyTrust(id, next) {
-    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, autoCreateDoc: next } : c)));
-    try {
-      await atUpdate(TABLES.counterparties, [{ id, fields: { AutomatischDocumentAanmaken: next } }]);
-      markSynced();
-    } catch (err) {
-      setAirtableError(err.message);
-    }
-  }
   async function toggleCounterpartyNoDocDefault(id, next) {
     setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, noDocDefault: next } : c)));
     try {
@@ -3263,7 +3253,6 @@ export default function CashflowPlanner() {
             onUpdatePriority={updateCounterpartyPriority}
             onUpdateFieldLocal={updateCounterpartyFieldLocal}
             onCommitField={commitCounterpartyField}
-            onToggleTrust={toggleCounterpartyTrust}
             onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
             onMergeCounterparties={mergeCounterparties}
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
@@ -5416,7 +5405,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleTrust, onToggleNoDocDefault, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [mergingFor, setMergingFor] = useState(null);
@@ -5871,15 +5860,6 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
                       />
                     </div>
-                    <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
-                      <input
-                        type="checkbox"
-                        checked={!!counterparty.autoCreateDoc}
-                        onChange={(e) => onToggleTrust(counterparty.id, e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300"
-                      />
-                      Automatisch document aanmaken bij bank-import (vertrouwde crediteur)
-                    </label>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
                       <input
                         type="checkbox"
