@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.80.0";
+const APP_VERSION = "1.81.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3080,7 +3080,7 @@ export default function CashflowPlanner() {
             <div className="flex items-center justify-between mt-4 text-xs text-slate-500">
               <span>Periode: volgende</span>
               <div className="flex gap-1">
-                {[30, 60, 90].map((d) => (
+                {[30, 60, 90, 180, 365].map((d) => (
                   <button
                     key={d}
                     onClick={() => setWindowDays(d)}
@@ -3088,7 +3088,7 @@ export default function CashflowPlanner() {
                       windowDays === d ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"
                     }`}
                   >
-                    {d}d
+                    {d === 180 ? "6m" : d === 365 ? "1j" : `${d}d`}
                   </button>
                 ))}
               </div>
@@ -3277,6 +3277,24 @@ export default function CashflowPlanner() {
                 Grafiek
               </button>
             </div>
+
+            <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
+              <span>Periode: volgende</span>
+              <div className="flex gap-1">
+                {[30, 60, 90, 180, 365].map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setWindowDays(d)}
+                    className={`px-2.5 py-1 rounded-md border text-xs ${
+                      windowDays === d ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"
+                    }`}
+                  >
+                    {d === 180 ? "6m" : d === 365 ? "1j" : `${d}d`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {budgetTab === "rapport" ? (
               <ReportView
                 reportTotals={reportTotals}
