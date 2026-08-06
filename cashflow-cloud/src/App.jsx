@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.79.1";
+const APP_VERSION = "1.80.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -633,6 +633,7 @@ export default function CashflowPlanner() {
     setBeheerTab("crediteuren");
   }
   const [windowDays, setWindowDays] = useState(60);
+  const [directionFilter, setDirectionFilter] = useState("all"); // all | in | uit — Planning én Betalingen
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newEntityName, setNewEntityName] = useState("");
@@ -1456,49 +1457,17 @@ export default function CashflowPlanner() {
     return { total: targets.length, done, failed };
   }
 
-  // Voor een Document zonder gekoppelde Betaling en zonder document-aanmaak-
-  // vertrouwen bij de crediteur: maakt een nieuw Document aan vanuit een
-  // ongekoppelde Betaling, na bevestiging in de UI (het "voorstel").
-  async function createDocumentFromPayment(payment, extra = {}) {
-    try {
-      const counterpartyId = extra.counterpartyId || null;
-      const fields = itemToFields({
-        description: extra.description || payment.description,
-        entityId: payment.entityId,
-        counterpartyId,
-        accountNumber: "",
-        note: payment.raw?.remittance || "",
-        amount: payment.amount,
-        direction: payment.direction,
-        dueDate: payment.date,
-        payDate: payment.date,
-        invoiceDate: null,
-        recurrence: "once",
-        endDate: null,
-        viaPaypal: false,
-        source: payment.source,
-        bankRef: payment.bankRef,
-        bankSnapshot: payment.raw ? JSON.stringify({ ...payment.raw, wasCreated: true }) : "",
-        read: false,
-        categoryId: payment.categoryId,
-        projectId: payment.projectId,
-      });
-      const [rec] = await atCreate(TABLES.items, [{ fields }]);
-      const created = itemFromRecord(rec);
-      setItems((prev) => [...prev, created]);
-      await linkPaymentToDocument(payment, created);
-      return created;
-    } catch (err) {
-      setAirtableError(err.message);
-      return null;
-    }
-  }
+  // createDocumentFromPayment ("Maak document") is verwijderd: Posten zijn
+  // enkel echte facturen/externe documenten (Billtobox, UBL/PDF, bank-import
+  // met echte inhoud), nooit synthetisch samengesteld uit een Betaling. Voor
+  // een betaling zonder echt document is "Geen document nodig" het juiste
+  // pad; voor toekomstige, nog niet gefactureerde herhaling: "herhalende post".
 
-  // Vanuit een betaling een HERHALENDE post opzetten (i.p.v. de eenmalige
-  // "maak document" hierboven) — voor het geval waarin je weet dat een
+  // Vanuit een betaling een HERHALENDE post opzetten (i.p.v. de vroegere
+  // eenmalige "maak document") — voor het geval waarin je weet dat een
   // betaling zich periodiek zal herhalen nog vóór er een formele factuur
   // per periode binnenkomt. Deze betaling zelf wordt als eerste betaalde
-  // occurrence gekoppeld, net als bij "maak document".
+  // occurrence gekoppeld.
   async function createRecurringPostFromPayment(payment, draft) {
     try {
       const fields = itemToFields({
@@ -1816,9 +1785,12 @@ export default function CashflowPlanner() {
     return rows;
   }, [items, filteredEntityIds, rangeStart, rangeEnd, paymentsById]);
 
-  const upcomingRows = occurrenceRows.filter((r) => !r.paid && r.displayDate <= rangeEnd);
+  const upcomingRows = occurrenceRows
+    .filter((r) => !r.paid && r.displayDate <= rangeEnd)
+    .filter((r) => directionFilter === "all" || r.item.direction === directionFilter);
   const recentPaidRows = occurrenceRows
     .filter((r) => r.paid && r.displayDate >= toISO(addDays(new Date(), -14)))
+    .filter((r) => directionFilter === "all" || r.item.direction === directionFilter)
     .sort((a, b) => (a.displayDate < b.displayDate ? 1 : -1));
 
   const groupedByDate = useMemo(() => {
@@ -3122,6 +3094,24 @@ export default function CashflowPlanner() {
               </div>
             </div>
 
+            <div className="flex gap-1 mt-2">
+              {[
+                { key: "all", label: "Alle" },
+                { key: "in", label: "Inkomsten" },
+                { key: "uit", label: "Uitgaven" },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setDirectionFilter(f.key)}
+                  className={`px-2.5 py-1 rounded-md border text-xs ${
+                    directionFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
             {/* New-item form (trigger button now lives in the always-visible header) */}
             {showForm && (
               <div className="mt-5">
@@ -3392,7 +3382,6 @@ export default function CashflowPlanner() {
                 onUnlink={unlinkPaymentFromDocument}
                 onToggleNoDocNeeded={toggleNoDocumentNeeded}
                 onAddManualPayment={addManualPayment}
-                onCreateDocFromPayment={createDocumentFromPayment}
                 onResolveCounterparty={resolveCounterpartyId}
                 onDeletePayment={deletePayment}
                 onBackfill={backfillHistoricBankPayments}
@@ -3413,6 +3402,8 @@ export default function CashflowPlanner() {
                 onCounterpartyClick={goToCounterparty}
                 onResolveCounterparty={resolveCounterpartyId}
                 onBulkAssignCounterparty={bulkAssignCounterparty}
+                directionFilter={directionFilter}
+                setDirectionFilter={setDirectionFilter}
                 onOpenRecurringDraft={(payment) =>
                   setRecurringDraft({
                     payment,
@@ -3974,7 +3965,6 @@ export default function CashflowPlanner() {
           onUpdateItemField={updateItemQuickField}
           onUpdatePaymentField={updatePaymentQuickField}
           onToggleNoDocNeeded={toggleNoDocumentNeeded}
-          onCreateDocFromPayment={createDocumentFromPayment}
         />
       )}
 
@@ -4733,7 +4723,7 @@ function ChartView({ runningBalances, activeEntity, entities }) {
 
 function KoppelenView({
   items, payments, entities, entityById, counterpartyById, counterparties, filteredEntityIds, activeEntity, categories, projects,
-  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onCreateDocFromPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail, onCounterpartyClick,
+  onLink, onUnlink, onToggleNoDocNeeded, onAddManualPayment, onResolveCounterparty, onDeletePayment, onBackfill, onOpenDetail, onCounterpartyClick,
 }) {
   // Koppelen kan vanuit beide kanten starten: klik eerst een betaling (dan
   // markeer je daarna het passende document), of omgekeerd — klik eerst een
@@ -4751,9 +4741,6 @@ function KoppelenView({
   };
   const [newPayment, setNewPayment] = useState(emptyNewPayment);
   const [adding, setAdding] = useState(false);
-  const [creatingDocForId, setCreatingDocForId] = useState(null);
-  const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
-  const [creatingDoc, setCreatingDoc] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState(null);
   // Volgorde van "Ongekoppelde documenten" — bewust apart instelbaar, want bij
@@ -4975,7 +4962,6 @@ function KoppelenView({
               const entity = entityById[p.entityId];
               const cp = p.counterpartyId ? counterpartyById[p.counterpartyId] : null;
               const selected = selection?.type === "payment" && selection.id === p.id;
-              const isCreatingDocRow = creatingDocForId === p.id;
               return (
                 <React.Fragment key={p.id}>
                 <div
@@ -5012,16 +4998,6 @@ function KoppelenView({
                       details
                     </button>
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCreatingDocForId(isCreatingDocRow ? null : p.id);
-                        setDocDraft({ description: p.description, counterpartyName: "" });
-                      }}
-                      className="text-[10px] text-slate-500 underline decoration-dotted"
-                    >
-                      maak document
-                    </button>
-                    <button
                       onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(p); }}
                       className="text-[10px] text-slate-400 underline decoration-dotted"
                     >
@@ -5035,41 +5011,6 @@ function KoppelenView({
                     </button>
                   </div>
                 </div>
-                {isCreatingDocRow && (
-                  <div className="px-3.5 pb-3.5 space-y-2" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      value={docDraft.description}
-                      onChange={(e) => setDocDraft({ ...docDraft, description: e.target.value })}
-                      placeholder="Omschrijving document"
-                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-                    />
-                    <input
-                      value={docDraft.counterpartyName}
-                      onChange={(e) => setDocDraft({ ...docDraft, counterpartyName: e.target.value })}
-                      placeholder="Crediteur/debiteur (optioneel — bestaande naam of nieuw)"
-                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async () => {
-                          setCreatingDoc(true);
-                          const counterpartyId = docDraft.counterpartyName.trim()
-                            ? await onResolveCounterparty(docDraft.counterpartyName.trim())
-                            : null;
-                          await onCreateDocFromPayment(p, { description: docDraft.description, counterpartyId });
-                          setCreatingDoc(false);
-                          setCreatingDocForId(null);
-                        }}
-                        className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium"
-                      >
-                        Bevestig document
-                      </button>
-                      <button onClick={() => setCreatingDocForId(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
-                        Annuleer
-                      </button>
-                    </div>
-                  </div>
-                )}
                 </React.Fragment>
               );
             })}
@@ -6506,7 +6447,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onCreateDocFromPayment }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -6526,9 +6467,6 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
   const project = record.projectId ? (projects || []).find((p) => p.id === record.projectId) : null;
   const [counterpartyInput, setCounterpartyInput] = useState("");
   const [savingCounterparty, setSavingCounterparty] = useState(false);
-  const [showCreateDoc, setShowCreateDoc] = useState(false);
-  const [docDraft, setDocDraft] = useState({ description: "", counterpartyName: "" });
-  const [creatingDoc, setCreatingDoc] = useState(false);
   const [showLinkDoc, setShowLinkDoc] = useState(false);
   const [chosenDocId, setChosenDocId] = useState("");
   const [linkingDoc, setLinkingDoc] = useState(false);
@@ -6817,13 +6755,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               <>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { setShowCreateDoc((s) => !s); setShowLinkDoc(false); setDocDraft({ description: record.description, counterpartyName: currentCounterparty?.name || "" }); }}
-                    className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-700"
-                  >
-                    Maak document
-                  </button>
-                  <button
-                    onClick={() => { setShowLinkDoc((s) => !s); setShowCreateDoc(false); setChosenDocId(""); }}
+                    onClick={() => { setShowLinkDoc((s) => !s); setChosenDocId(""); }}
                     className="flex-1 text-xs border border-slate-200 rounded-lg py-1.5 text-slate-700"
                   >
                     Koppel aan document
@@ -6875,43 +6807,6 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                     )}
                   </div>
                 )}
-                {showCreateDoc && (
-                  <div className="mt-2 space-y-2">
-                    <input
-                      value={docDraft.description}
-                      onChange={(e) => setDocDraft({ ...docDraft, description: e.target.value })}
-                      placeholder="Omschrijving document"
-                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-                    />
-                    <CounterpartyAutocomplete
-                      value={docDraft.counterpartyName}
-                      onChange={(v) => setDocDraft({ ...docDraft, counterpartyName: v })}
-                      counterparties={counterparties || []}
-                      placeholder="Crediteur/debiteur (optioneel — bestaande naam of nieuw)"
-                      inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={async () => {
-                          setCreatingDoc(true);
-                          const counterpartyId = docDraft.counterpartyName.trim()
-                            ? await onResolveCounterparty(docDraft.counterpartyName.trim())
-                            : null;
-                          await onCreateDocFromPayment(record, { description: docDraft.description, counterpartyId });
-                          setCreatingDoc(false);
-                          setShowCreateDoc(false);
-                        }}
-                        disabled={creatingDoc}
-                        className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
-                      >
-                        {creatingDoc ? "Bezig…" : "Bevestig document"}
-                      </button>
-                      <button onClick={() => setShowCreateDoc(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
-                        Annuleer
-                      </button>
-                    </div>
-                  </div>
-                )}
               </>
             )}
           </div>
@@ -6947,7 +6842,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 // betalingen met "geen document nodig", die in het Koppelen-scherm nergens
 // verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
 // vallen.
-function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty }) {
+function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty, directionFilter, setDirectionFilter }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCounterparty, setBulkCounterparty] = useState("");
@@ -6975,7 +6870,9 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
     return "unlinked";
   }
 
-  const scoped = payments.filter((p) => filteredEntityIds.includes(p.entityId));
+  const scoped = payments
+    .filter((p) => filteredEntityIds.includes(p.entityId))
+    .filter((p) => directionFilter === "all" || p.direction === directionFilter);
   const query = searchQuery.trim().toLowerCase();
   const filtered = scoped
     .filter((p) => statusFilter === "all" || (statusFilter === "nocp" ? !p.counterpartyId : statusOf(p) === statusFilter))
@@ -7046,6 +6943,24 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
               }`}
             >
               {f.label} ({counts[f.key]})
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-1.5">
+          {[
+            { key: "all", label: "Alle" },
+            { key: "in", label: "Inkomsten" },
+            { key: "uit", label: "Uitgaven" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setDirectionFilter(f.key)}
+              className={`px-2.5 py-1 rounded-md border text-xs ${
+                directionFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
+              }`}
+            >
+              {f.label}
             </button>
           ))}
         </div>
