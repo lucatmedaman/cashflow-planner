@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.78.0";
+const APP_VERSION = "1.79.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6964,6 +6964,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   }
 
   function statusOf(p) {
+    if (p.transferType) return "transfer";
     if ((p.documentIds || []).length > 0) return "linked";
     if (p.noDocumentNeeded) return "nodoc";
     return "unlinked";
@@ -7003,6 +7004,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
     linked: scoped.filter((p) => statusOf(p) === "linked").length,
     unlinked: scoped.filter((p) => statusOf(p) === "unlinked").length,
     nodoc: scoped.filter((p) => statusOf(p) === "nodoc").length,
+    transfer: scoped.filter((p) => statusOf(p) === "transfer").length,
     nocp: scoped.filter((p) => !p.counterpartyId).length,
   };
   const totalIn = filtered.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
@@ -7013,6 +7015,7 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
     { key: "linked", label: "Gekoppeld" },
     { key: "unlinked", label: "Ongekoppeld" },
     { key: "nodoc", label: "Geen document nodig" },
+    { key: "transfer", label: "Interne overschrijving" },
     { key: "nocp", label: "Zonder crediteur" },
   ];
 
@@ -7172,10 +7175,12 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                           ? "bg-emerald-50 text-emerald-600"
                           : status === "nodoc"
                           ? "bg-slate-100 text-slate-500"
+                          : status === "transfer"
+                          ? "bg-sky-50 text-sky-600"
                           : "bg-amber-50 text-amber-600"
                       }`}
                     >
-                      {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
+                      {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : status === "transfer" ? "Interne overschrijving" : "Ongekoppeld"}
                     </span>
                   </div>
                 </div>
