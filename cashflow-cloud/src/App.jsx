@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.81.0";
+const APP_VERSION = "1.82.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5541,6 +5541,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [newPattern, setNewPattern] = useState("");
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
+  const [cpTypeFilter, setCpTypeFilter] = useState("all"); // all | debiteur | crediteur
 
   useEffect(() => {
     if (!jumpToCounterpartyId) return;
@@ -5576,6 +5577,19 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
       });
     const list = Object.values(byId)
       .filter((g) => g.items.length > 0 || g.payments.length > 0)
+      .map((g) => {
+        const totalIn = g.items.length > 0
+          ? g.items.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0)
+          : g.payments.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
+        const totalUit = g.items.length > 0
+          ? g.items.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0)
+          : g.payments.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
+        // Type volgt de overwegende richting van de posten/betalingen bij
+        // deze partij: overwegend "in" -> debiteur (betaalt aan ons),
+        // overwegend "uit" -> crediteur (wij betalen aan hen).
+        const type = totalIn > totalUit ? "debiteur" : totalUit > totalIn ? "crediteur" : "gemengd";
+        return { ...g, totalIn, totalUit, type };
+      })
       .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name));
     return { list, zonder };
   }, [scoped, counterparties, payments, filteredEntityIds]);
@@ -5799,6 +5813,10 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
     </div>
   );
 
+  const filteredGroupList = groups.list.filter(
+    (g) => cpTypeFilter === "all" || g.type === cpTypeFilter
+  );
+
   if (groups.list.length === 0) {
     return (
       <div className="mt-4 space-y-2">
@@ -5816,12 +5834,29 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   return (
     <div className="mt-4 space-y-2">
       {mappingBar}
+      <div className="flex gap-1.5">
+        {[
+          { key: "all", label: "Alle" },
+          { key: "debiteur", label: "Debiteuren" },
+          { key: "crediteur", label: "Crediteuren" },
+        ].map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setCpTypeFilter(f.key)}
+            className={`px-2.5 py-1 rounded-md border text-xs ${
+              cpTypeFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
+            }`}
+          >
+            {f.label} ({f.key === "all" ? groups.list.length : groups.list.filter((g) => g.type === f.key).length})
+          </button>
+        ))}
+      </div>
       {applyResult && (
         <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
           {applyResult.renamed} hernoemd, {applyResult.merged} samengevoegd.
         </p>
       )}
-      {groups.list.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
+      {filteredGroupList.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
         const totalIn = cpItems.length > 0
           ? cpItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0)
           : cpPayments.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
