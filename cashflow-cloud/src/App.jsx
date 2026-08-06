@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.74.0";
+const APP_VERSION = "1.75.0";
 const VIEW_LABELS = {
   planning: "Planning",
   rapport: "Rapport",
@@ -138,6 +138,47 @@ function generateOccurrences(item, rangeStart, rangeEnd) {
     cursor = step(cursor);
   }
   return occurrences;
+}
+
+// Toegestane afwijking (dagen) tussen een occurrence-vervaldatum en de datum
+// van een gekoppelde Betaling, per herhalingstype. Hergebruikt op elke plek
+// die een Betaling aan de dichtstbijzijnde occurrence van een post koppelt.
+function toleranceDaysFor(recurrence) {
+  return { weekly: 5, biweekly: 8, monthly: 12, bimonthly: 20, quarterly: 25, yearly: 40 }[recurrence] || 15;
+}
+
+// Betaalstatus per occurrence, afgeleid uit de gekoppelde Betalingen van een
+// post — vervangt het losse BetaaldeData-veld als bron van waarheid.
+// Voor "once"-posten: de laatst gekoppelde Betaling (indien meerdere) geldt.
+// Voor herhalende posten: elke Betaling wordt gekoppeld aan haar dichtstbij-
+// zijnde occurrence binnen de tolerantie; bij samenval op dezelfde occurrence
+// wint de Betaling met de laatste (meest recente) datum.
+// Retourneert een Map<occurrenceDateISO, payment>.
+function occurrencePaymentMap(item, paymentsById) {
+  const map = new Map();
+  const linked = (item.paymentIds || []).map((id) => paymentsById[id]).filter(Boolean);
+  if (linked.length === 0) return map;
+
+  if (item.recurrence === "once") {
+    const latest = linked.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).slice(-1)[0];
+    map.set(item.dueDate, latest);
+    return map;
+  }
+
+  const tolerance = toleranceDaysFor(item.recurrence);
+  for (const p of linked) {
+    const pDate = fromISO(p.date);
+    const windowStart = toISO(addDays(pDate, -tolerance));
+    const windowEnd = toISO(addDays(pDate, tolerance));
+    const occ = generateOccurrences(item, windowStart, windowEnd);
+    if (occ.length === 0) continue;
+    const nearest = occ.slice().sort(
+      (a, b) => Math.abs(fromISO(a.date) - pDate) - Math.abs(fromISO(b.date) - pDate)
+    )[0];
+    const existing = map.get(nearest.date);
+    if (!existing || p.date >= existing.date) map.set(nearest.date, p);
+  }
+  return map;
 }
 
 function entityColor(entity) {
@@ -321,10 +362,6 @@ function paymentToFields(payment) {
 }
 
 function itemFromRecord(r) {
-  let paidDates = [];
-  try {
-    paidDates = r.fields.BetaaldeData ? JSON.parse(r.fields.BetaaldeData) : [];
-  } catch (e) {}
   return {
     id: r.id,
     entityId: r.fields.Boekhouding?.[0] || null,
@@ -348,7 +385,6 @@ function itemFromRecord(r) {
     projectId: r.fields.Project?.[0] || null,
     paymentIds: r.fields.Betalingen || [],
     priority: r.fields.Prioriteit || "",
-    paidDates,
   };
 }
 function itemToFields(item) {
@@ -372,7 +408,6 @@ function itemToFields(item) {
     Gelezen: !!item.read,
     Categorie: item.categoryId ? [item.categoryId] : [],
     Project: item.projectId ? [item.projectId] : [],
-    BetaaldeData: JSON.stringify(item.paidDates || []),
     Prioriteit: item.priority || null,
   };
 }
@@ -544,6 +579,11 @@ export default function CashflowPlanner() {
   const [counterparties, setCounterparties] = useState([]);
   const [nameMappings, setNameMappings] = useState([]);
   const [payments, setPayments] = useState([]);
+  const paymentsById = useMemo(() => {
+    const map = {};
+    for (const p of payments) map[p.id] = p;
+    return map;
+  }, [payments]);
   const [categories, setCategories] = useState([]);
   const [projects, setProjects] = useState([]);
   // Logboek van sync-/importacties (PocketSmith-sync, Bank-import,
@@ -986,6 +1026,7 @@ export default function CashflowPlanner() {
     // collide with each other before React state catches up.
     let workingItems = items;
     let workingPayments = payments;
+    let workingPaymentsById = { ...paymentsById };
 
     // Cross-bron-dedup: PocketSmith-betalingen dragen "ps-<id>" als
     // referentie, terwijl CAMT/CSV de échte bankreferentie hebben — dezelfde
@@ -1039,8 +1080,9 @@ export default function CashflowPlanner() {
         for (const cand of candidates) {
           const windowStart = toISO(addDays(entryDate, -10));
           const windowEnd = toISO(addDays(entryDate, 10));
+          const candPaidOcc = occurrencePaymentMap(cand, workingPaymentsById);
           const occ = generateOccurrences(cand, windowStart, windowEnd)
-            .filter((o) => !(cand.paidDates || []).includes(o.date));
+            .filter((o) => !candPaidOcc.has(o.date));
           if (occ.length > 0) {
             occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate));
             matchedItem = cand;
@@ -1088,17 +1130,17 @@ export default function CashflowPlanner() {
         const [paymentRec] = await atCreate(TABLES.payments, [{ fields: paymentFields }]);
         let newPayment = paymentFromRecord(paymentRec);
         workingPayments = [...workingPayments, newPayment];
+        workingPaymentsById = { ...workingPaymentsById, [newPayment.id]: newPayment };
 
         if (matchedItem) {
-          const newPaidDates = [...(matchedItem.paidDates || []), matchedDate];
           const newDocPaymentIds = [...(matchedItem.paymentIds || []), newPayment.id];
           await atUpdate(TABLES.items, [{
             id: matchedItem.id,
-            fields: { BetaaldeData: JSON.stringify(newPaidDates), Betalingen: newDocPaymentIds, Bron: "Bank-import", Gelezen: false },
+            fields: { Betalingen: newDocPaymentIds, Bron: "Bank-import", Gelezen: false },
           }]);
           workingItems = workingItems.map((i) =>
             i.id === matchedItem.id
-              ? { ...i, paidDates: newPaidDates, paymentIds: newDocPaymentIds, source: "Bank-import", read: false }
+              ? { ...i, paymentIds: newDocPaymentIds, source: "Bank-import", read: false }
               : i
           );
           matched++;
@@ -1161,18 +1203,21 @@ export default function CashflowPlanner() {
       }
 
       // --- undo on the wrong item ---
-      const remainingPaidDates = (wrongItem.paidDates || []).filter((d) => d !== snapshot.bookingDate);
-      const wasPurelyBankCreated = wrongItem.recurrence === "once" && remainingPaidDates.length === 0;
+      // Betaalstatus is nu afgeleid uit gelinkte Betalingen, dus enkel de
+      // gekoppelde Betalingen (paymentIds) bepalen nog of het item "puur
+      // bank-aangemaakt" was; het bankSnapshot/BankRef op de Post zelf is
+      // legacy en draagt niet meer bij aan de betaalstatus.
+      const wasPurelyBankCreated = wrongItem.recurrence === "once" && (wrongItem.paymentIds || []).length === 0;
 
       if (wasPurelyBankCreated) {
         await atDelete(TABLES.items, [wrongItem.id]);
         setItems((prev) => prev.filter((i) => i.id !== wrongItem.id));
       } else {
-        const fields = { BetaaldeData: JSON.stringify(remainingPaidDates), Bron: "Handmatig", BankRef: "", BankSnapshot: "" };
+        const fields = { Bron: "Handmatig", BankRef: "", BankSnapshot: "" };
         await atUpdate(TABLES.items, [{ id: wrongItem.id, fields }]);
         setItems((prev) =>
           prev.map((i) =>
-            i.id === wrongItem.id ? { ...i, paidDates: remainingPaidDates, source: "Handmatig", bankRef: "", bankSnapshot: "" } : i
+            i.id === wrongItem.id ? { ...i, source: "Handmatig", bankRef: "", bankSnapshot: "" } : i
           )
         );
       }
@@ -1183,19 +1228,8 @@ export default function CashflowPlanner() {
         setAirtableError("Doelpost niet gevonden.");
         return;
       }
-      const entryDate = fromISO(snapshot.bookingDate);
-      const windowStart = toISO(addDays(entryDate, -10));
-      const windowEnd = toISO(addDays(entryDate, 10));
-      const occ = generateOccurrences(targetItem, windowStart, windowEnd)
-        .filter((o) => !(targetItem.paidDates || []).includes(o.date));
-      const matchDate = occ.length > 0
-        ? occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate))[0].date
-        : snapshot.bookingDate;
-
-      const newPaidDates = [...(targetItem.paidDates || []), matchDate];
       const relinkedSnapshot = JSON.stringify({ ...snapshot, wasCreated: false });
       const fields = {
-        BetaaldeData: JSON.stringify(newPaidDates),
         Bron: "Bank-import",
         BankRef: snapshot.ref || "",
         BankSnapshot: relinkedSnapshot,
@@ -1205,7 +1239,7 @@ export default function CashflowPlanner() {
       setItems((prev) =>
         prev.map((i) =>
           i.id === targetItem.id
-            ? { ...i, paidDates: newPaidDates, source: "Bank-import", bankRef: snapshot.ref || "", bankSnapshot: relinkedSnapshot, read: false }
+            ? { ...i, source: "Bank-import", bankRef: snapshot.ref || "", bankSnapshot: relinkedSnapshot, read: false }
             : i
         )
       );
@@ -1227,23 +1261,17 @@ export default function CashflowPlanner() {
         return;
       }
 
-      const wasPaid = (duplicateItem.paidDates || []).length > 0;
-      const referenceDate = wasPaid
-        ? duplicateItem.paidDates.slice().sort().slice(-1)[0]
-        : duplicateItem.dueDate;
-
-      if (wasPaid) {
-        const refDateObj = fromISO(referenceDate);
-        const windowStart = toISO(addDays(refDateObj, -10));
-        const windowEnd = toISO(addDays(refDateObj, 10));
-        const occ = generateOccurrences(targetItem, windowStart, windowEnd)
-          .filter((o) => !(targetItem.paidDates || []).includes(o.date));
-        const matchDate = occ.length > 0
-          ? occ.sort((a, b) => Math.abs(fromISO(a.date) - refDateObj) - Math.abs(fromISO(b.date) - refDateObj))[0].date
-          : referenceDate;
-        const newPaidDates = [...(targetItem.paidDates || []), matchDate];
-        await atUpdate(TABLES.items, [{ id: targetItem.id, fields: { BetaaldeData: JSON.stringify(newPaidDates) } }]);
-        setItems((prev) => prev.map((i) => (i.id === targetItem.id ? { ...i, paidDates: newPaidDates } : i)));
+      // Betaalstatus volgt nu uit gelinkte Betalingen: bij een merge
+      // verhuizen we de echte Betaling-records van de duplicate naar de
+      // doelpost (i.p.v. vroeger een paidDates-datum te kopiëren), zodat de
+      // occurrence-matching op de doelpost meteen klopt.
+      const duplicatePaymentIds = duplicateItem.paymentIds || [];
+      if (duplicatePaymentIds.length > 0) {
+        const newTargetPaymentIds = Array.from(new Set([...(targetItem.paymentIds || []), ...duplicatePaymentIds]));
+        await atUpdate(TABLES.items, [{ id: targetItem.id, fields: { Betalingen: newTargetPaymentIds } }]);
+        setItems((prev) => prev.map((i) => (i.id === targetItem.id ? { ...i, paymentIds: newTargetPaymentIds } : i)));
+        await atUpdate(TABLES.payments, duplicatePaymentIds.map((pid) => ({ id: pid, fields: { GekoppeldeDocumenten: [targetItem.id] } })));
+        setPayments((prev) => prev.map((p) => (duplicatePaymentIds.includes(p.id) ? { ...p, documentIds: [targetItem.id] } : p)));
       }
 
       await atDelete(TABLES.items, [duplicateItem.id]);
@@ -1266,42 +1294,23 @@ export default function CashflowPlanner() {
 
   // ---- Betalingen <-> Documenten koppeling (Fase 1 van de herstructurering) ----
 
-  // Koppelt een Betaling aan een Document: legt de wederzijdse link, en werkt
-  // (voor achterwaartse compatibiliteit met alle bestaande betaald-logica)
-  // ook meteen de BetaaldeData van het document bij, zodat Planning/
-  // Crediteuren/Rapport ongewijzigd blijven werken.
+  // Koppelt een Betaling aan een Document: legt de wederzijdse link. De
+  // betaalstatus (Planning/Crediteuren/Rapport) volgt automatisch uit deze
+  // link via occurrencePaymentMap, geen apart veld meer om bij te werken.
   async function linkPaymentToDocument(payment, doc) {
     try {
-      const entryDate = fromISO(payment.date);
-      // Bewust veel ruimer venster dan de ±10 dagen van de automatische
-      // bank-matching: dit is een handmatige koppeling, de gebruiker heeft
-      // al beslist dát deze betaling bij dit document hoort — we zoeken
-      // enkel nog wélke vervaldag ze dekt. Voorheen viel de code buiten
-      // ±10 dagen terug op de betaaldatum zelf als "betaalde datum", maar
-      // die is nooit een vervaldag-occurrence, waardoor de post ondanks de
-      // koppeling onbetaald bleef ogen in Planning.
-      const windowStart = toISO(addDays(entryDate, -90));
-      const windowEnd = toISO(addDays(entryDate, 90));
-      const occ = generateOccurrences(doc, windowStart, windowEnd)
-        .filter((o) => !(doc.paidDates || []).includes(o.date));
-      let matchDate;
-      if (occ.length > 0) {
-        matchDate = occ.sort((a, b) => Math.abs(fromISO(a.date) - entryDate) - Math.abs(fromISO(b.date) - entryDate))[0].date;
-      } else if (!(doc.paidDates || []).includes(doc.dueDate)) {
-        matchDate = doc.dueDate;
-      } else {
-        matchDate = payment.date;
-      }
-      const newPaidDates = [...(doc.paidDates || []), matchDate];
+      // Betaalstatus volgt nu automatisch uit de link zelf, via
+      // occurrencePaymentMap — hier hoeft enkel de koppeling gelegd te
+      // worden, geen aparte "betaalde datum" meer te worden bepaald.
       const newDocPaymentIds = [...(doc.paymentIds || []), payment.id];
       const newPaymentDocIds = [...(payment.documentIds || []), doc.id];
 
       await Promise.all([
-        atUpdate(TABLES.items, [{ id: doc.id, fields: { BetaaldeData: JSON.stringify(newPaidDates), Betalingen: newDocPaymentIds } }]),
+        atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]),
         atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]),
       ]);
 
-      setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paidDates: newPaidDates, paymentIds: newDocPaymentIds } : i)));
+      setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i)));
       setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
       markSynced();
     } catch (err) {
@@ -1316,20 +1325,12 @@ export default function CashflowPlanner() {
       await atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]);
       setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
       if (doc) {
+        // Ontkoppelen van de link is genoeg — de occurrence-status volgt
+        // meteen uit occurrencePaymentMap zodra deze Betaling niet meer in
+        // doc.paymentIds voorkomt, geen apart veld meer om op te schonen.
         const newDocPaymentIds = (doc.paymentIds || []).filter((id) => id !== payment.id);
-        // Verwijder ook de betaald-markering die bij het koppelen werd gezet —
-        // anders blijft het document als "betaald" gelden zonder koppeling.
-        const paymentDate = fromISO(payment.date);
-        const paidDates = doc.paidDates || [];
-        let newPaidDates = paidDates;
-        if (paidDates.length > 0) {
-          const closest = paidDates.slice().sort(
-            (a, b) => Math.abs(fromISO(a) - paymentDate) - Math.abs(fromISO(b) - paymentDate)
-          )[0];
-          newPaidDates = paidDates.filter((d) => d !== closest);
-        }
-        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds, BetaaldeData: JSON.stringify(newPaidDates) } }]);
-        setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds, paidDates: newPaidDates } : i)));
+        await atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]);
+        setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i)));
       }
       markSynced();
     } catch (err) {
@@ -1378,8 +1379,8 @@ export default function CashflowPlanner() {
   }
 
   // Verwijdert een Betaling. Was ze nog gekoppeld, dan wordt eerst netjes
-  // ontkoppeld (paidDates op de gekoppelde documenten opgeschoond) voor de
-  // betaling zelf verdwijnt — zelfde opruimlogica als unlinkPaymentFromDocument.
+  // ontkoppeld (zodat de betaalstatus van de gekoppelde post meteen klopt)
+  // voor de betaling zelf verdwijnt.
   async function deletePayment(payment) {
     if (!window.confirm(`Betaling "${payment.description}" (${eur(payment.amount)}) verwijderen? Dit kan niet ongedaan gemaakt worden.`)) return;
     try {
@@ -1475,7 +1476,6 @@ export default function CashflowPlanner() {
         read: false,
         categoryId: payment.categoryId,
         projectId: payment.projectId,
-        paidDates: [],
       });
       const [rec] = await atCreate(TABLES.items, [{ fields }]);
       const created = itemFromRecord(rec);
@@ -1515,7 +1515,6 @@ export default function CashflowPlanner() {
         read: false,
         categoryId: payment.categoryId,
         projectId: payment.projectId,
-        paidDates: [],
       });
       const [rec] = await atCreate(TABLES.items, [{ fields }]);
       const created = itemFromRecord(rec);
@@ -1777,9 +1776,10 @@ export default function CashflowPlanner() {
     const rows = [];
     items.forEach((item) => {
       if (!filteredEntityIds.includes(item.entityId)) return;
+      const paidOcc = occurrencePaymentMap(item, paymentsById);
       const occ = generateOccurrences(item, rangeStart, rangeEnd);
       occ.forEach((o) => {
-        const paid = (item.paidDates || []).includes(o.date);
+        const paid = paidOcc.has(o.date);
         const row = { itemId: item.id, date: o.date, paid, item };
         row.displayDate = projectedPayDate(row);
         rows.push(row);
@@ -1790,7 +1790,7 @@ export default function CashflowPlanner() {
       return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
     });
     return rows;
-  }, [items, filteredEntityIds, rangeStart, rangeEnd]);
+  }, [items, filteredEntityIds, rangeStart, rangeEnd, paymentsById]);
 
   const upcomingRows = occurrenceRows.filter((r) => !r.paid && r.displayDate <= rangeEnd);
   const recentPaidRows = occurrenceRows
@@ -1824,15 +1824,16 @@ export default function CashflowPlanner() {
   const allOccurrenceRows = useMemo(() => {
     const rows = [];
     items.forEach((item) => {
+      const paidOcc = occurrencePaymentMap(item, paymentsById);
       const occ = generateOccurrences(item, rangeStart, rangeEnd);
       occ.forEach((o) => {
-        const paid = (item.paidDates || []).includes(o.date);
+        const paid = paidOcc.has(o.date);
         rows.push({ itemId: item.id, date: o.date, paid, item });
       });
     });
     rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return rows;
-  }, [items, rangeStart, rangeEnd]);
+  }, [items, rangeStart, rangeEnd, paymentsById]);
   const allUpcomingRows = allOccurrenceRows.filter((r) => !r.paid && r.date <= rangeEnd);
 
   // ---- report data: per entity totals + daily net series — ALWAYS all boekhoudingen ----
@@ -1843,13 +1844,14 @@ export default function CashflowPlanner() {
   const paymentHistory = useMemo(() => {
     const rows = [];
     items.forEach((item) => {
-      (item.paidDates || []).forEach((date) => {
-        rows.push({ date, item });
+      (item.paymentIds || []).forEach((pid) => {
+        const p = paymentsById[pid];
+        if (p) rows.push({ date: p.date, item });
       });
     });
     rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
     return rows;
-  }, [items]);
+  }, [items, paymentsById]);
 
   // "Interne overschrijving"-categorie: telt wél mee in elke boekhouding
   // afzonderlijk (echte cashflow voor die ene boekhouding), maar wordt
@@ -2096,9 +2098,10 @@ export default function CashflowPlanner() {
       // Tolerantie op maat van het ritme — ruim genoeg om een factuur die
       // wat vroeger/later valt dan de vorige keer toch te herkennen, strak
       // genoeg om nooit de verkeerde periode te raken.
-      const tolerance = { weekly: 5, biweekly: 8, monthly: 12, bimonthly: 20, quarterly: 25, yearly: 40 }[it.recurrence] || 15;
+      const tolerance = toleranceDaysFor(it.recurrence);
+      const paidOcc = occurrencePaymentMap(it, paymentsById);
       const occs = generateOccurrences(it, toISO(addDays(target, -tolerance)), toISO(addDays(target, tolerance)))
-        .filter((o) => !(it.paidDates || []).includes(o.date));
+        .filter((o) => !paidOcc.has(o.date));
       for (const o of occs) {
         const diff = Math.abs(fromISO(o.date) - target);
         if (diff < bestDiff) { bestDiff = diff; best = it; }
@@ -2162,8 +2165,7 @@ export default function CashflowPlanner() {
           endDate: null,
           viaPaypal: false,
           priority: "",
-          paidDates: [],
-        };
+          };
         const fields = itemToFields(draft);
         fields.Bron = ublDraft.source === "PDF" ? "Handmatig" : "Billtobox";
         const [rec] = await atCreate(TABLES.items, [{ fields }]);
@@ -2485,7 +2487,6 @@ export default function CashflowPlanner() {
         endDate: form.recurrence !== "once" && form.endDate ? form.endDate : null,
         viaPaypal: !!form.viaPaypal,
         priority: form.priority || "",
-        paidDates: editingId ? items.find((i) => i.id === editingId)?.paidDates || [] : [],
       };
 
       // Standaard neemt een post de prioriteit van zijn debiteur/crediteur
@@ -2554,7 +2555,7 @@ export default function CashflowPlanner() {
 
   async function duplicateItem(item) {
     try {
-      const fields = itemToFields({ ...item, paidDates: [] });
+      const fields = itemToFields(item);
       const [rec] = await atCreate(TABLES.items, [{ fields }]);
       const created = itemFromRecord(rec);
       setItems((prev) => [...prev, created]);
@@ -2565,16 +2566,43 @@ export default function CashflowPlanner() {
     }
   }
 
-  async function togglePaid(itemId, date) {
+  // Vervangt de vroegere togglePaid (die enkel een datum in BetaaldeData
+  // omschakelde). Betaalstatus wordt nu uitsluitend afgeleid uit gelinkte
+  // Betalingen, dus "betaald markeren" maakt/koppelt een echte Betaling i.p.v.
+  // een los datumveld te zetten — elke betaalmarkering heeft nu altijd een
+  // onderliggende Betaling-record (Bron: Handmatig indien hier aangemaakt).
+  async function markOccurrencePaid(itemId, date) {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
-    const paidDates = new Set(item.paidDates || []);
-    if (paidDates.has(date)) paidDates.delete(date);
-    else paidDates.add(date);
-    const nextPaidDates = Array.from(paidDates);
-    setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, paidDates: nextPaidDates } : i)));
+    const paidOcc = occurrencePaymentMap(item, paymentsById);
+    const existing = paidOcc.get(date);
+    if (existing) {
+      // Al betaald op deze occurrence: ontkoppelen. De Betaling zelf blijft
+      // bestaan (het geld is en blijft uitgegeven), enkel de koppeling aan
+      // déze post verdwijnt.
+      await unlinkPaymentFromDocument(existing, itemId);
+      return;
+    }
     try {
-      await atUpdate(TABLES.items, [{ id: itemId, fields: { BetaaldeData: JSON.stringify(nextPaidDates) } }]);
+      const fields = paymentToFields({
+        description: item.description,
+        date,
+        amount: item.amount,
+        direction: item.direction,
+        entityId: item.entityId,
+        source: "Handmatig",
+        categoryId: item.categoryId,
+        projectId: item.projectId,
+        counterpartyId: item.counterpartyId,
+        documentIds: [itemId],
+        noDocumentNeeded: false,
+      });
+      const [rec] = await atCreate(TABLES.payments, [{ fields }]);
+      const created = paymentFromRecord(rec);
+      setPayments((prev) => [...prev, created]);
+      const newDocPaymentIds = [...(item.paymentIds || []), created.id];
+      await atUpdate(TABLES.items, [{ id: itemId, fields: { Betalingen: newDocPaymentIds } }]);
+      setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, paymentIds: newDocPaymentIds } : i)));
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -3089,7 +3117,7 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
+                          onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
                           onOpenDetail={openDetail} />
@@ -3142,7 +3170,7 @@ export default function CashflowPlanner() {
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
                         <ItemRow row={r} entity={entityById[r.item.entityId]}
                           counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                          onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
                           onOpenDetail={openDetail} />
@@ -3181,7 +3209,7 @@ export default function CashflowPlanner() {
                     <React.Fragment key={`${r.itemId}-${r.date}-paid`}>
                       <ItemRow row={r} entity={entityById[r.item.entityId]}
                         counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                        onTogglePaid={togglePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                        onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                         onCounterpartyClick={goToCounterparty}
                         payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
                         onOpenDetail={openDetail} />
@@ -3228,7 +3256,7 @@ export default function CashflowPlanner() {
             entities={sortedEntities}
             entityById={entityById}
             filteredEntityIds={filteredEntityIds}
-            onTogglePaid={togglePaid}
+            onTogglePaid={markOccurrencePaid}
             onEdit={startEdit}
             onDelete={deleteItem}
             onDuplicate={duplicateItem}
@@ -4626,8 +4654,7 @@ function KoppelenView({
   const unlinkedDocs = items
     .filter((it) =>
       filteredEntityIds.includes(it.entityId) &&
-      (it.paymentIds || []).length === 0 &&
-      (it.paidDates || []).length === 0
+      (it.paymentIds || []).length === 0
     )
     .sort((a, b) => {
       let cmp;
@@ -5407,6 +5434,11 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
 
 function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
+  const cpPaymentsById = useMemo(() => {
+    const map = {};
+    for (const p of payments) map[p.id] = p;
+    return map;
+  }, [payments]);
   const [editDetailsFor, setEditDetailsFor] = useState(null);
   const [mergingFor, setMergingFor] = useState(null);
   const [mergeTargetId, setMergeTargetId] = useState("");
@@ -5880,14 +5912,13 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     const entity = entityById[item.entityId];
                     const c = entityColor(entity);
                     const isIn = item.direction === "in";
-                    const paidDates = item.paidDates || [];
-                    const isPaidOnce = item.recurrence === "once" && paidDates.includes(item.dueDate);
-                    const lastPaid = paidDates.length > 0 ? paidDates.slice().sort().slice(-1)[0] : null;
+                    const paidOcc = occurrencePaymentMap(item, cpPaymentsById);
+                    const isPaidOnce = item.recurrence === "once" && paidOcc.has(item.dueDate);
 
                     // Voor herhalende posten: welke vervaldatum raakt een klik?
                     // De datum die het dichtst bij vandaag ligt, betaald of niet.
                     let nearestOccurrenceDate = item.dueDate;
-                    let nearestOccurrencePaid = lastPaid !== null;
+                    let nearestOccurrencePaid = paidOcc.size > 0;
                     if (item.recurrence !== "once") {
                       const today = todayISO();
                       const windowStart = toISO(addDays(fromISO(today), -365));
@@ -5898,7 +5929,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           (a, b) => Math.abs(fromISO(a.date) - fromISO(today)) - Math.abs(fromISO(b.date) - fromISO(today))
                         );
                         nearestOccurrenceDate = sorted[0].date;
-                        nearestOccurrencePaid = paidDates.includes(nearestOccurrenceDate);
+                        nearestOccurrencePaid = paidOcc.has(nearestOccurrenceDate);
                       }
                     }
 
@@ -6543,7 +6574,14 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               <EditableField label="Opmerking" field="note" />
               <Row label="Via PayPal" value={record.viaPaypal ? "Ja" : null} />
               <Row label="Gelezen" value={record.read ? "Ja" : "Nee"} />
-              <Row label="Betaalde data" value={(record.paidDates || []).length > 0 ? record.paidDates.join(", ") : null} />
+              <Row
+                label="Betaalde data"
+                value={(() => {
+                  const map = occurrencePaymentMap(record, Object.fromEntries((payments || []).map((p) => [p.id, p])));
+                  const dates = Array.from(map.keys()).sort();
+                  return dates.length > 0 ? dates.join(", ") : null;
+                })()}
+              />
             </>
           ) : (
             <EditableField label="Datum" field="date" type="date" />
