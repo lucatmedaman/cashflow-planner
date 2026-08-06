@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.77.0";
+const APP_VERSION = "1.77.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2595,7 +2595,7 @@ export default function CashflowPlanner() {
         amount: item.amount,
         direction: item.direction,
         entityId: item.entityId,
-        source: "Handmatig",
+        source: "Cash-handmatig",
         categoryId: item.categoryId,
         projectId: item.projectId,
         counterpartyId: item.counterpartyId,
