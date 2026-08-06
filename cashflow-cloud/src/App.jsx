@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.82.0";
+const APP_VERSION = "1.83.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -303,6 +303,7 @@ function counterpartyFromRecord(r) {
     address: r.fields.Adres || "",
     priority: r.fields.Prioriteit || "",
     noDocDefault: !!r.fields.StandaardGeenDocumentNodig,
+    type: r.fields.Debiteuren_Crediteuren || "Debiteur",
   };
 }
 
@@ -2353,6 +2354,15 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
+  async function updateCounterpartyType(id, type) {
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, type } : c)));
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { Debiteuren_Crediteuren: type } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
 
   // Wijst een debiteur/crediteur toe aan een bestaande Betaling — nodig
   // omdat het "+ Nieuwe betaling"-formulier dit al kon instellen bij
@@ -3369,6 +3379,7 @@ export default function CashflowPlanner() {
                 onUpdateFieldLocal={updateCounterpartyFieldLocal}
                 onCommitField={commitCounterpartyField}
                 onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
+                onUpdateType={updateCounterpartyType}
                 onMergeCounterparties={mergeCounterparties}
                 onCleanupDuplicateGroup={cleanupDuplicateGroup}
                 unusedCounterparties={unusedCounterparties}
@@ -5514,7 +5525,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const cpPaymentsById = useMemo(() => {
     const map = {};
@@ -5584,10 +5595,10 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
         const totalUit = g.items.length > 0
           ? g.items.filter((i) => i.direction === "uit").reduce((s, i) => s + i.amount, 0)
           : g.payments.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
-        // Type volgt de overwegende richting van de posten/betalingen bij
-        // deze partij: overwegend "in" -> debiteur (betaalt aan ons),
-        // overwegend "uit" -> crediteur (wij betalen aan hen).
-        const type = totalIn > totalUit ? "debiteur" : totalUit > totalIn ? "crediteur" : "gemengd";
+        // Type komt nu uit het echte Airtable-veld (Debiteuren_Crediteuren),
+        // niet meer afgeleid uit in/uit-totalen — "Debiteur" als veilige
+        // fallback voor partijen waar het veld nog niet gezet is.
+        const type = g.counterparty.type || "Debiteur";
         return { ...g, totalIn, totalUit, type };
       })
       .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name));
@@ -5837,8 +5848,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
       <div className="flex gap-1.5">
         {[
           { key: "all", label: "Alle" },
-          { key: "debiteur", label: "Debiteuren" },
-          { key: "crediteur", label: "Crediteuren" },
+          { key: "Debiteur", label: "Debiteuren" },
+          { key: "Crediteur", label: "Crediteuren" },
         ].map((f) => (
           <button
             key={f.key}
@@ -6008,6 +6019,17 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         onBlur={() => onCommitField(counterparty.id, "address")}
                         className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
                       />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Type</label>
+                      <select
+                        value={counterparty.type || "Debiteur"}
+                        onChange={(e) => onUpdateType(counterparty.id, e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="Debiteur">Debiteur</option>
+                        <option value="Crediteur">Crediteur</option>
+                      </select>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
                       <input
