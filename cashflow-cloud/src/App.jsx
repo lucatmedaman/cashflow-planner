@@ -11,16 +11,19 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.76.0";
+const APP_VERSION = "1.77.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
-  crediteuren: "Crediteuren",
-  afpunten: "Afpunten",
-  koppelen: "Koppelen",
-  betalingen: "Betalingen",
-  boekhoudingen: "Boekhoudingen",
+  beheer: "Beheer",
 };
+const BEHEER_TABS = [
+  { key: "crediteuren", label: "Crediteuren" },
+  { key: "afpunten", label: "Afpunten" },
+  { key: "koppelen", label: "Koppelen" },
+  { key: "betalingen", label: "Betalingen" },
+  { key: "boekhoudingen", label: "Boekhoudingen" },
+];
 
 const STORAGE_KEY = "cashflow-data"; // now used only as an offline cache / migration source
 
@@ -600,6 +603,7 @@ export default function CashflowPlanner() {
 
   const [view, setView] = useState("planning"); // planning | budget | crediteuren | ...
   const [budgetTab, setBudgetTab] = useState("rapport"); // sub-tab binnen Budget: rapport | grafiek
+  const [beheerTab, setBeheerTab] = useState("crediteuren"); // sub-tab binnen Beheer
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef(null);
   const [showEntityMenu, setShowEntityMenu] = useState(false);
@@ -625,7 +629,8 @@ export default function CashflowPlanner() {
   function goToCounterparty(counterpartyId) {
     if (!counterpartyId) return;
     setJumpToCounterpartyId(counterpartyId);
-    setView("crediteuren");
+    setView("beheer");
+    setBeheerTab("crediteuren");
   }
   const [windowDays, setWindowDays] = useState(60);
   const [showForm, setShowForm] = useState(false);
@@ -2803,7 +2808,7 @@ export default function CashflowPlanner() {
                 className="flex items-center gap-1.5 bg-white border border-[#E3E7E4] rounded-full px-4 py-1.5 text-sm text-[#12181F] font-medium"
               >
                 {VIEW_LABELS[view]}
-                {view === "afpunten" && unreadCount > 0 ? ` (${unreadCount})` : ""}
+                {view === "beheer" && beheerTab === "afpunten" && unreadCount > 0 ? ` (${unreadCount})` : ""}
                 <ChevronDown className={`w-4 h-4 text-[#93999F] transition-transform ${showViewMenu ? "rotate-180" : ""}`} />
               </button>
               {showViewMenu && (
@@ -2817,7 +2822,7 @@ export default function CashflowPlanner() {
                       }`}
                     >
                       {label}
-                      {key === "afpunten" && unreadCount > 0 && (
+                      {key === "beheer" && unreadCount > 0 && (
                         <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${view === key ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>
                           {unreadCount}
                         </span>
@@ -3028,7 +3033,7 @@ export default function CashflowPlanner() {
                 })}
                 <div className="border-t border-slate-100 mt-1 pt-1">
                   <button
-                    onClick={() => { setView("boekhoudingen"); setShowEntityMenu(false); }}
+                    onClick={() => { setView("beheer"); setBeheerTab("boekhoudingen"); setShowEntityMenu(false); }}
                     className="w-full text-left px-4 py-2 text-sm text-[#93999F] flex items-center gap-1.5"
                   >
                     <Plus className="w-3.5 h-3.5" /> Boekhouding toevoegen
@@ -3038,7 +3043,7 @@ export default function CashflowPlanner() {
             )}
           </div>
 
-          {view === "crediteuren" && (
+          {view === "beheer" && beheerTab === "crediteuren" && (
             <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1.5 mt-2">
               {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
                 const targetId = counterpartyLetterIndex[letter];
@@ -3270,123 +3275,145 @@ export default function CashflowPlanner() {
               />
             )}
           </>
-        ) : view === "crediteuren" ? (
-          <CounterpartyView
-            items={items}
-            payments={payments}
-            counterparties={counterparties}
-            entities={sortedEntities}
-            entityById={entityById}
-            filteredEntityIds={filteredEntityIds}
-            onTogglePaid={markOccurrencePaid}
-            onEdit={startEdit}
-            onDelete={deleteItem}
-            onDuplicate={duplicateItem}
-            editingId={editingId}
-            form={form}
-            setForm={setForm}
-            onSubmit={submitForm}
-            onCancel={resetForm}
-            onApplyMappings={applyNameMappings}
-            nameMappings={nameMappings}
-            onAddMapping={addNameMapping}
-            onUpdateMappingLocal={updateNameMappingLocal}
-            onCommitMapping={commitNameMapping}
-            onDeleteMapping={deleteNameMapping}
-            jumpToCounterpartyId={jumpToCounterpartyId}
-            onJumpHandled={() => setJumpToCounterpartyId(null)}
-            onRelink={relinkBankEntry}
-            onMerge={mergeDuplicateItem}
-            onLinkPayment={linkPaymentToDocument}
-            onUnlinkPayment={unlinkPaymentFromDocument}
-            onOpenDetail={openDetail}
-            onUpdatePriority={updateCounterpartyPriority}
-            onUpdateFieldLocal={updateCounterpartyFieldLocal}
-            onCommitField={commitCounterpartyField}
-            onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
-            onMergeCounterparties={mergeCounterparties}
-            onCleanupDuplicateGroup={cleanupDuplicateGroup}
-            unusedCounterparties={unusedCounterparties}
-            onDeleteUnusedCounterparties={deleteUnusedCounterparties}
-          />
-        ) : view === "afpunten" ? (
-          <ReconciliationView
-            items={items}
-            entityById={entityById}
-            counterpartyById={counterpartyById}
-            filteredEntityIds={filteredEntityIds}
-            onRelink={relinkBankEntry}
-            onMarkRead={markRead}
-            onCounterpartyClick={goToCounterparty}
-          />
-        ) : view === "koppelen" ? (
-          <KoppelenView
-            items={items}
-            payments={payments}
-            entities={sortedEntities}
-            entityById={entityById}
-            counterpartyById={counterpartyById}
-            counterparties={counterparties}
-            filteredEntityIds={filteredEntityIds}
-            activeEntity={activeEntity}
-            categories={categories}
-            projects={projects}
-            onLink={linkPaymentToDocument}
-            onUnlink={unlinkPaymentFromDocument}
-            onToggleNoDocNeeded={toggleNoDocumentNeeded}
-            onAddManualPayment={addManualPayment}
-            onCreateDocFromPayment={createDocumentFromPayment}
-            onResolveCounterparty={resolveCounterpartyId}
-            onDeletePayment={deletePayment}
-            onBackfill={backfillHistoricBankPayments}
-            onOpenDetail={openDetail}
-            onCounterpartyClick={goToCounterparty}
-          />
-        ) : view === "betalingen" ? (
-          <BetalingenView
-            payments={payments}
-            entityById={entityById}
-            counterpartyById={counterpartyById}
-            counterparties={counterparties}
-            filteredEntityIds={filteredEntityIds}
-            categories={categories}
-            projects={projects}
-            onOpenDetail={openDetail}
-            onDeletePayment={deletePayment}
-            onCounterpartyClick={goToCounterparty}
-            onResolveCounterparty={resolveCounterpartyId}
-            onBulkAssignCounterparty={bulkAssignCounterparty}
-            onOpenRecurringDraft={(payment) =>
-              setRecurringDraft({
-                payment,
-                entityId: payment.entityId,
-                counterparty: counterpartyById[payment.counterpartyId]?.name || payment.description,
-                counterpartyId: payment.counterpartyId || null,
-                description: payment.description,
-                amount: payment.amount,
-                dueDate: payment.date,
-                recurrence: "monthly",
-                endDate: "",
-              })
-            }
-          />
         ) : (
-          <BoekhoudingenView
-            entities={sortedEntities}
-            newEntityName={newEntityName}
-            setNewEntityName={setNewEntityName}
-            onAddEntity={addEntity}
-            onMoveEntity={moveEntity}
-            onUpdateOpeningBalanceLocal={updateOpeningBalanceLocal}
-            onCommitOpeningBalance={commitOpeningBalance}
-            onUpdateEntityFieldLocal={updateEntityFieldLocal}
-            onCommitEntityIban={commitEntityIban}
-            onCommitEntityPocketsmith={commitEntityPocketsmith}
-            onCommitEntityExactOnlineEmail={commitEntityExactOnlineEmail}
-            onRemoveEntity={removeEntity}
-            lastUpdateByEntity={lastUpdateByEntity}
-            firstBankStatementByEntity={firstBankStatementByEntity}
-          />
+          <>
+            <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl p-1 mt-2 w-fit">
+              {BEHEER_TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setBeheerTab(t.key)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg flex items-center gap-1.5 ${
+                    beheerTab === t.key ? "bg-[#12181F] text-[#F4F6F5]" : "text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {t.label}
+                  {t.key === "afpunten" && unreadCount > 0 && (
+                    <span className={`text-[10px] rounded-full px-1.5 py-0.5 ${beheerTab === t.key ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {beheerTab === "crediteuren" ? (
+              <CounterpartyView
+                items={items}
+                payments={payments}
+                counterparties={counterparties}
+                entities={sortedEntities}
+                entityById={entityById}
+                filteredEntityIds={filteredEntityIds}
+                onTogglePaid={markOccurrencePaid}
+                onEdit={startEdit}
+                onDelete={deleteItem}
+                onDuplicate={duplicateItem}
+                editingId={editingId}
+                form={form}
+                setForm={setForm}
+                onSubmit={submitForm}
+                onCancel={resetForm}
+                onApplyMappings={applyNameMappings}
+                nameMappings={nameMappings}
+                onAddMapping={addNameMapping}
+                onUpdateMappingLocal={updateNameMappingLocal}
+                onCommitMapping={commitNameMapping}
+                onDeleteMapping={deleteNameMapping}
+                jumpToCounterpartyId={jumpToCounterpartyId}
+                onJumpHandled={() => setJumpToCounterpartyId(null)}
+                onRelink={relinkBankEntry}
+                onMerge={mergeDuplicateItem}
+                onLinkPayment={linkPaymentToDocument}
+                onUnlinkPayment={unlinkPaymentFromDocument}
+                onOpenDetail={openDetail}
+                onUpdatePriority={updateCounterpartyPriority}
+                onUpdateFieldLocal={updateCounterpartyFieldLocal}
+                onCommitField={commitCounterpartyField}
+                onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
+                onMergeCounterparties={mergeCounterparties}
+                onCleanupDuplicateGroup={cleanupDuplicateGroup}
+                unusedCounterparties={unusedCounterparties}
+                onDeleteUnusedCounterparties={deleteUnusedCounterparties}
+              />
+            ) : beheerTab === "afpunten" ? (
+              <ReconciliationView
+                items={items}
+                entityById={entityById}
+                counterpartyById={counterpartyById}
+                filteredEntityIds={filteredEntityIds}
+                onRelink={relinkBankEntry}
+                onMarkRead={markRead}
+                onCounterpartyClick={goToCounterparty}
+              />
+            ) : beheerTab === "koppelen" ? (
+              <KoppelenView
+                items={items}
+                payments={payments}
+                entities={sortedEntities}
+                entityById={entityById}
+                counterpartyById={counterpartyById}
+                counterparties={counterparties}
+                filteredEntityIds={filteredEntityIds}
+                activeEntity={activeEntity}
+                categories={categories}
+                projects={projects}
+                onLink={linkPaymentToDocument}
+                onUnlink={unlinkPaymentFromDocument}
+                onToggleNoDocNeeded={toggleNoDocumentNeeded}
+                onAddManualPayment={addManualPayment}
+                onCreateDocFromPayment={createDocumentFromPayment}
+                onResolveCounterparty={resolveCounterpartyId}
+                onDeletePayment={deletePayment}
+                onBackfill={backfillHistoricBankPayments}
+                onOpenDetail={openDetail}
+                onCounterpartyClick={goToCounterparty}
+              />
+            ) : beheerTab === "betalingen" ? (
+              <BetalingenView
+                payments={payments}
+                entityById={entityById}
+                counterpartyById={counterpartyById}
+                counterparties={counterparties}
+                filteredEntityIds={filteredEntityIds}
+                categories={categories}
+                projects={projects}
+                onOpenDetail={openDetail}
+                onDeletePayment={deletePayment}
+                onCounterpartyClick={goToCounterparty}
+                onResolveCounterparty={resolveCounterpartyId}
+                onBulkAssignCounterparty={bulkAssignCounterparty}
+                onOpenRecurringDraft={(payment) =>
+                  setRecurringDraft({
+                    payment,
+                    entityId: payment.entityId,
+                    counterparty: counterpartyById[payment.counterpartyId]?.name || payment.description,
+                    counterpartyId: payment.counterpartyId || null,
+                    description: payment.description,
+                    amount: payment.amount,
+                    dueDate: payment.date,
+                    recurrence: "monthly",
+                    endDate: "",
+                  })
+                }
+              />
+            ) : (
+              <BoekhoudingenView
+                entities={sortedEntities}
+                newEntityName={newEntityName}
+                setNewEntityName={setNewEntityName}
+                onAddEntity={addEntity}
+                onMoveEntity={moveEntity}
+                onUpdateOpeningBalanceLocal={updateOpeningBalanceLocal}
+                onCommitOpeningBalance={commitOpeningBalance}
+                onUpdateEntityFieldLocal={updateEntityFieldLocal}
+                onCommitEntityIban={commitEntityIban}
+                onCommitEntityPocketsmith={commitEntityPocketsmith}
+                onCommitEntityExactOnlineEmail={commitEntityExactOnlineEmail}
+                onRemoveEntity={removeEntity}
+                lastUpdateByEntity={lastUpdateByEntity}
+                firstBankStatementByEntity={firstBankStatementByEntity}
+              />
+            )}
+          </>
         )}
       </div>
 
