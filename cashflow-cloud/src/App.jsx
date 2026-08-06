@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.79.0";
+const APP_VERSION = "1.79.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2603,7 +2603,12 @@ export default function CashflowPlanner() {
     if (existing) {
       // Al betaald op deze occurrence: ontkoppelen. De Betaling zelf blijft
       // bestaan (het geld is en blijft uitgegeven), enkel de koppeling aan
-      // déze post verdwijnt.
+      // déze post verdwijnt — maar dit is een echte betaling, geen los
+      // datumveld meer, dus eerst expliciet bevestigen.
+      const confirmed = window.confirm(
+        `Betaling "${existing.description}" (${eur(existing.amount)}, ${existing.date}) loskoppelen van "${item.description}"?\n\nDe betaling zelf blijft bestaan, enkel de koppeling aan deze post verdwijnt.`
+      );
+      if (!confirmed) return;
       await unlinkPaymentFromDocument(existing, itemId);
       return;
     }
