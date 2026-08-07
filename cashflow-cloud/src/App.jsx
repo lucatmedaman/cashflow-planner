@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.84.0";
+const APP_VERSION = "1.85.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -308,6 +308,7 @@ function counterpartyFromRecord(r) {
     priority: r.fields.Prioriteit || "",
     noDocDefault: !!r.fields.StandaardGeenDocumentNodig,
     type: r.fields.Debiteuren_Crediteuren || "Debiteur",
+    defaultAccountId: (r.fields.StandaardBetaalrekening || [])[0] || null,
   };
 }
 
@@ -2390,6 +2391,15 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
+  async function updateCounterpartyDefaultAccount(id, accountId) {
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, defaultAccountId: accountId || null } : c)));
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { StandaardBetaalrekening: accountId ? [accountId] : [] } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
 
   // Wijst een debiteur/crediteur toe aan een bestaande Betaling — nodig
   // omdat het "+ Nieuwe betaling"-formulier dit al kon instellen bij
@@ -3414,6 +3424,7 @@ export default function CashflowPlanner() {
                 onCommitField={commitCounterpartyField}
                 onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
                 onUpdateType={updateCounterpartyType}
+                onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
                 onMergeCounterparties={mergeCounterparties}
                 onCleanupDuplicateGroup={cleanupDuplicateGroup}
                 unusedCounterparties={unusedCounterparties}
@@ -4318,6 +4329,24 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
         placeholder="Debiteur / crediteur (optioneel, bv. Elektriciteitsleverancier X)"
         inputClassName="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400"
       />
+
+      {(() => {
+        const matchedCp = counterparties.find(
+          (c) => c.name.trim().toLowerCase() === form.counterparty.trim().toLowerCase()
+        );
+        if (!matchedCp?.defaultAccountId || form.entityId === matchedCp.defaultAccountId) return null;
+        const acct = entities.find((e) => e.id === matchedCp.defaultAccountId);
+        if (!acct) return null;
+        return (
+          <button
+            type="button"
+            onClick={() => setForm({ ...form, entityId: acct.id })}
+            className="w-full text-left text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100"
+          >
+            Standaard betaalrekening van {matchedCp.name}: <span className="font-medium">{acct.name}</span> — klik om te gebruiken
+          </button>
+        );
+      })()}
 
       {(() => {
         const matchedCp = counterparties.find(
@@ -5559,7 +5588,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const cpPaymentsById = useMemo(() => {
     const map = {};
@@ -6063,6 +6092,19 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                       >
                         <option value="Debiteur">Debiteur</option>
                         <option value="Crediteur">Crediteur</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Standaard betaalrekening (optioneel)</label>
+                      <select
+                        value={counterparty.defaultAccountId || ""}
+                        onChange={(e) => onUpdateDefaultAccount(counterparty.id, e.target.value || null)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="">Geen vaste rekening — telkens kiezen</option>
+                        {entities.map((e) => (
+                          <option key={e.id} value={e.id}>{e.name}</option>
+                        ))}
                       </select>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
