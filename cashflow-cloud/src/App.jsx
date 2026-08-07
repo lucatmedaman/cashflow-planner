@@ -11,10 +11,11 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.85.0";
+const APP_VERSION = "1.86.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
+  debiteuren: "Debiteuren",
   beheer: "Beheer",
 };
 const BEHEER_TABS = [
@@ -3369,6 +3370,48 @@ export default function CashflowPlanner() {
               />
             )}
           </>
+        ) : view === "debiteuren" ? (
+          <CounterpartyView
+            items={items}
+            payments={payments}
+            counterparties={counterparties}
+            entities={sortedEntities}
+            entityById={entityById}
+            filteredEntityIds={filteredEntityIds}
+            onTogglePaid={markOccurrencePaid}
+            onEdit={startEdit}
+            onDelete={deleteItem}
+            onDuplicate={duplicateItem}
+            editingId={editingId}
+            form={form}
+            setForm={setForm}
+            onSubmit={submitForm}
+            onCancel={resetForm}
+            onApplyMappings={applyNameMappings}
+            nameMappings={nameMappings}
+            onAddMapping={addNameMapping}
+            onUpdateMappingLocal={updateNameMappingLocal}
+            onCommitMapping={commitNameMapping}
+            onDeleteMapping={deleteNameMapping}
+            jumpToCounterpartyId={jumpToCounterpartyId}
+            onJumpHandled={() => setJumpToCounterpartyId(null)}
+            onRelink={relinkBankEntry}
+            onMerge={mergeDuplicateItem}
+            onLinkPayment={linkPaymentToDocument}
+            onUnlinkPayment={unlinkPaymentFromDocument}
+            onOpenDetail={openDetail}
+            onUpdatePriority={updateCounterpartyPriority}
+            onUpdateFieldLocal={updateCounterpartyFieldLocal}
+            onCommitField={commitCounterpartyField}
+            onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
+            onUpdateType={updateCounterpartyType}
+            onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
+            onMergeCounterparties={mergeCounterparties}
+            onCleanupDuplicateGroup={cleanupDuplicateGroup}
+            unusedCounterparties={unusedCounterparties}
+            onDeleteUnusedCounterparties={deleteUnusedCounterparties}
+            initialTypeFilter="Debiteur"
+          />
         ) : (
           <>
             <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl p-1 mt-2 w-fit">
@@ -4822,6 +4865,7 @@ function KoppelenView({
   // document, en markeer daarna de passende betaling. `selection` onthoudt
   // welke kant als eerste is aangeklikt.
   const [selection, setSelection] = useState(null); // { type: "payment" | "doc", id }
+  const [pendingLink, setPendingLink] = useState(null); // { payment, doc } — wacht op bevestiging
   const [showLinked, setShowLinked] = useState(false);
   const [showUnlinkedPayments, setShowUnlinkedPayments] = useState(true);
   const [showUnlinkedDocs, setShowUnlinkedDocs] = useState(true);
@@ -5057,10 +5101,9 @@ function KoppelenView({
               return (
                 <React.Fragment key={p.id}>
                 <div
-                  onClick={async () => {
+                  onClick={() => {
                     if (selectedDoc) {
-                      await onLink(p, selectedDoc);
-                      setSelection(null);
+                      setPendingLink({ payment: p, doc: selectedDoc });
                       return;
                     }
                     setSelection(selected ? null : { type: "payment", id: p.id });
@@ -5154,10 +5197,9 @@ function KoppelenView({
               return (
                 <div
                   key={doc.id}
-                  onClick={async () => {
+                  onClick={() => {
                     if (selectedPayment) {
-                      await onLink(selectedPayment, doc);
-                      setSelection(null);
+                      setPendingLink({ payment: selectedPayment, doc });
                       return;
                     }
                     setSelection(docSelected ? null : { type: "doc", id: doc.id });
@@ -5270,6 +5312,67 @@ function KoppelenView({
           </div>
         )}
       </div>
+
+      {pendingLink && (() => {
+        const { payment: pp, doc } = pendingLink;
+        const payEntity = entityById[pp.entityId];
+        const docEntity = entityById[doc.entityId];
+        const payCp = pp.counterpartyId ? counterpartyById[pp.counterpartyId] : null;
+        const docCp = doc.counterpartyId ? counterpartyById[doc.counterpartyId] : null;
+        const amountMismatch = Math.abs(pp.amount - doc.amount) > 0.005;
+        const entityMismatch = pp.entityId !== doc.entityId;
+        return (
+          <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-30" onClick={() => setPendingLink(null)}>
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl p-5 w-full sm:w-[28rem] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <h3 className="font-medium text-slate-900 mb-3">Koppeling bevestigen</h3>
+
+              <div className="border border-slate-200 rounded-xl p-3 mb-2">
+                <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Betaling</p>
+                <p className="text-sm text-slate-800">{pp.description}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{payEntity?.name} · {pp.date} · {pp.source}</p>
+                <p className="text-xs text-slate-500">{payCp?.name || "geen crediteur"} · {eur(pp.amount)} · {pp.direction === "in" ? "inkomst" : "uitgave"}</p>
+              </div>
+
+              <div className="flex justify-center py-1">
+                <ArrowUpDown className="w-4 h-4 text-slate-300 rotate-90" />
+              </div>
+
+              <div className="border border-slate-200 rounded-xl p-3 mb-3">
+                <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">Document</p>
+                <p className="text-sm text-slate-800">{doc.description}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{docEntity?.name} · Verval: {doc.dueDate} · {doc.source}</p>
+                <p className="text-xs text-slate-500">{docCp?.name || "geen crediteur"} · {eur(doc.amount)} · {doc.direction === "in" ? "inkomst" : "uitgave"}</p>
+              </div>
+
+              {(amountMismatch || entityMismatch) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-amber-700 space-y-0.5">
+                  {amountMismatch && <p>Bedragen verschillen: {eur(pp.amount)} vs {eur(doc.amount)}</p>}
+                  {entityMismatch && <p>Verschillende boekhoudingen: {payEntity?.name} vs {docEntity?.name}</p>}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    await onLink(pp, doc);
+                    setPendingLink(null);
+                    setSelection(null);
+                  }}
+                  className="flex-1 bg-slate-900 text-white rounded-lg py-2 text-sm font-medium"
+                >
+                  Bevestig koppeling
+                </button>
+                <button
+                  onClick={() => setPendingLink(null)}
+                  className="flex-1 border border-slate-200 rounded-lg py-2 text-sm text-slate-600"
+                >
+                  Annuleer
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -5588,7 +5691,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const cpPaymentsById = useMemo(() => {
     const map = {};
@@ -5615,7 +5718,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [newPattern, setNewPattern] = useState("");
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
-  const [cpTypeFilter, setCpTypeFilter] = useState("all"); // all | debiteur | crediteur
+  const [cpTypeFilter, setCpTypeFilter] = useState(initialTypeFilter || "all"); // all | Debiteur | Crediteur
 
   useEffect(() => {
     if (!jumpToCounterpartyId) return;
