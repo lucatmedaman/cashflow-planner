@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.83.0";
+const APP_VERSION = "1.84.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -292,7 +292,11 @@ function entityFromRecord(r) {
     bankBalanceDate: r.fields.BankSaldoDatum || null,
     exactOnlineEmail: r.fields.ExactOnlineEmail || "",
     colorIdx: colorIdxFromId(r.id),
+    groupId: (r.fields.Entiteit || [])[0] || null,
   };
+}
+function entityGroupFromRecord(r) {
+  return { id: r.id, name: r.fields.Naam || "(naamloos)" };
 }
 function counterpartyFromRecord(r) {
   return {
@@ -589,6 +593,7 @@ export default function CashflowPlanner() {
   }, [payments]);
   const [categories, setCategories] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [entityGroups, setEntityGroups] = useState([]);
   // Logboek van sync-/importacties (PocketSmith-sync, Bank-import,
   // UBL/PDF-inlezen, JSON-import) — voor "laatst uitgevoerd op"-weergave in
   // het Acties-menu. Persistent in Airtable (TABLES.actionLog), niet enkel
@@ -786,7 +791,7 @@ export default function CashflowPlanner() {
   }
 
   async function loadFromAirtable() {
-    const [entRecs, cpRecs, itemRecs, mapRecs, paymentRecs, catRecs, projRecs, logRecs] = await Promise.all([
+    const [entRecs, cpRecs, itemRecs, mapRecs, paymentRecs, catRecs, projRecs, logRecs, entGroupRecs] = await Promise.all([
       atListAll(TABLES.entities),
       atListAll(TABLES.counterparties),
       atListAll(TABLES.items),
@@ -795,6 +800,7 @@ export default function CashflowPlanner() {
       atListAll(TABLES.categories),
       atListAll(TABLES.projects),
       atListAll(TABLES.actionLog),
+      atListAll(TABLES.entityGroups),
     ]);
     return {
       entities: entRecs.map(entityFromRecord),
@@ -809,6 +815,7 @@ export default function CashflowPlanner() {
       payments: paymentRecs.map(paymentFromRecord),
       categories: catRecs.map(categoryFromRecord),
       projects: projRecs.map(projectFromRecord),
+      entityGroups: entGroupRecs.map(entityGroupFromRecord),
       actionLog: logRecs.map((r) => ({
         id: r.id,
         actie: r.fields.Actie || "",
@@ -847,6 +854,7 @@ export default function CashflowPlanner() {
         setPayments(data.payments || []);
         setCategories(data.categories || []);
         setProjects(data.projects || []);
+        setEntityGroups(data.entityGroups || []);
         setActionLog(data.actionLog || []);
         setOfflineMode(false);
         setAirtableError("");
@@ -883,6 +891,7 @@ export default function CashflowPlanner() {
       setPayments(data.payments || []);
       setCategories(data.categories || []);
       setProjects(data.projects || []);
+      setEntityGroups(data.entityGroups || []);
       setActionLog(data.actionLog || []);
       setOfflineMode(false);
       markSynced();
@@ -941,6 +950,7 @@ export default function CashflowPlanner() {
         setPayments(data.payments || []);
         setCategories(data.categories || []);
         setProjects(data.projects || []);
+        setEntityGroups(data.entityGroups || []);
         setActionLog(data.actionLog || []);
         markSynced();
         logAction("JSON-import", null, `${parsed.items?.length ?? "?"} posten, ${parsed.counterparties?.length ?? "?"} tegenpartijen`);
@@ -1612,6 +1622,23 @@ export default function CashflowPlanner() {
     () => [...entities].sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name)),
     [entities]
   );
+
+  // Groepeert de Boekhoudingen-dropdown per Entiteit (Medaman/Dr. Luc Belmans
+  // BV/Privé/O&O/L&L). Boekhoudingen zonder (nog) gekoppelde Entiteit vallen
+  // onder "Overig" i.p.v. te verdwijnen.
+  const groupedEntityMenu = useMemo(() => {
+    const byGroup = new Map();
+    entityGroups.forEach((g) => byGroup.set(g.id, { group: g, entities: [] }));
+    const overig = [];
+    sortedEntities.forEach((e) => {
+      if (e.groupId && byGroup.has(e.groupId)) byGroup.get(e.groupId).entities.push(e);
+      else overig.push(e);
+    });
+    const sections = Array.from(byGroup.values()).filter((s) => s.entities.length > 0);
+    sections.sort((a, b) => a.group.name.localeCompare(b.group.name));
+    if (overig.length > 0) sections.push({ group: { id: "overig", name: "Overig" }, entities: overig });
+    return sections;
+  }, [entityGroups, sortedEntities]);
 
   const unreadCount = useMemo(
     () => items.filter((i) => (i.source === "Bank-import" || i.source === "Billtobox") && !i.read).length,
@@ -3031,20 +3058,27 @@ export default function CashflowPlanner() {
                 >
                   Alle boekhoudingen
                 </button>
-                {sortedEntities.map((e) => {
-                  const c = entityColor(e);
-                  const active = activeEntity === e.id;
-                  return (
-                    <button
-                      key={e.id}
-                      onClick={() => { setActiveEntity(e.id); setShowEntityMenu(false); }}
-                      className={`w-full text-left px-4 py-2 text-sm flex items-center gap-1.5 ${active ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"}`}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? "white" : c.dot }} />
-                      {e.name}
-                    </button>
-                  );
-                })}
+                {groupedEntityMenu.map(({ group, entities: groupEntities }) => (
+                  <div key={group.id}>
+                    <div className="px-4 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                      {group.name}
+                    </div>
+                    {groupEntities.map((e) => {
+                      const c = entityColor(e);
+                      const active = activeEntity === e.id;
+                      return (
+                        <button
+                          key={e.id}
+                          onClick={() => { setActiveEntity(e.id); setShowEntityMenu(false); }}
+                          className={`w-full text-left px-4 py-2 text-sm flex items-center gap-1.5 ${active ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"}`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? "white" : c.dot }} />
+                          {e.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
                 <div className="border-t border-slate-100 mt-1 pt-1">
                   <button
                     onClick={() => { setView("beheer"); setBeheerTab("boekhoudingen"); setShowEntityMenu(false); }}
