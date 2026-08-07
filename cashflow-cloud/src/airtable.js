@@ -11,6 +11,7 @@ export const TABLES = {
   categories: "tblo7GAlHqh767fuk", // Categorieën
   projects: "tblr58NYZuYrsIXXH", // Projecten
   actionLog: "tbltUr8SdtKKQ89RH", // ActieLog — datum/tijdstip van sync- en importacties
+  entityGroups: "tblCMEoeKL9pQYNf0", // Entiteiten — Medaman/Dr. Luc Belmans BV/Privé/O&O/L&L, groeperen de Boekhoudingen
 };
 
 const API_ROOT = "/api/airtable";
