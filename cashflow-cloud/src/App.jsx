@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.86.0";
+const APP_VERSION = "1.87.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5719,6 +5719,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
   const [cpTypeFilter, setCpTypeFilter] = useState(initialTypeFilter || "all"); // all | Debiteur | Crediteur
+  const [viewMode, setViewMode] = useState("lijst"); // lijst | matrix
 
   useEffect(() => {
     if (!jumpToCounterpartyId) return;
@@ -6011,29 +6012,114 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   return (
     <div className="mt-4 space-y-2">
       {mappingBar}
-      <div className="flex gap-1.5">
-        {[
-          { key: "all", label: "Alle" },
-          { key: "Debiteur", label: "Debiteuren" },
-          { key: "Crediteur", label: "Crediteuren" },
-        ].map((f) => (
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex gap-1.5">
+          {[
+            { key: "all", label: "Alle" },
+            { key: "Debiteur", label: "Debiteuren" },
+            { key: "Crediteur", label: "Crediteuren" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setCpTypeFilter(f.key)}
+              className={`px-2.5 py-1 rounded-md border text-xs ${
+                cpTypeFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
+              }`}
+            >
+              {f.label} ({f.key === "all" ? groups.list.length : groups.list.filter((g) => g.type === f.key).length})
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
           <button
-            key={f.key}
-            onClick={() => setCpTypeFilter(f.key)}
-            className={`px-2.5 py-1 rounded-md border text-xs ${
-              cpTypeFilter === f.key ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
-            }`}
+            onClick={() => setViewMode("lijst")}
+            className={`px-2.5 py-1 rounded-md text-xs ${viewMode === "lijst" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
           >
-            {f.label} ({f.key === "all" ? groups.list.length : groups.list.filter((g) => g.type === f.key).length})
+            Lijst
           </button>
-        ))}
+          <button
+            onClick={() => setViewMode("matrix")}
+            className={`px-2.5 py-1 rounded-md text-xs ${viewMode === "matrix" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
+          >
+            2-koloms
+          </button>
+        </div>
       </div>
       {applyResult && (
         <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1.5">
           {applyResult.renamed} hernoemd, {applyResult.merged} samengevoegd.
         </p>
       )}
-      {filteredGroupList.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
+      {viewMode === "matrix" ? (
+        <div className="space-y-3">
+          {filteredGroupList.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
+            const paymentById = {};
+            cpPayments.forEach((p) => (paymentById[p.id] = p));
+            const usedPaymentIds = new Set();
+            const rows = [];
+            cpItems.forEach((item) => {
+              const linked = (item.paymentIds || []).map((pid) => paymentById[pid]).filter(Boolean);
+              if (linked.length === 0) {
+                rows.push({ date: item.dueDate, payment: null, item });
+              } else {
+                linked.forEach((p) => {
+                  rows.push({ date: item.dueDate, payment: p, item });
+                  usedPaymentIds.add(p.id);
+                });
+              }
+            });
+            cpPayments.forEach((p) => {
+              if (!usedPaymentIds.has(p.id)) rows.push({ date: p.date, payment: p, item: null });
+            });
+            rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+            return (
+              <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
+                <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-800">{counterparty.name}</span>
+                  <span className="text-[10px] text-slate-400">{counterparty.type || "Debiteur"}</span>
+                </div>
+                <div className="grid grid-cols-2 text-[10px] uppercase tracking-wide text-slate-400 px-3.5 pt-2">
+                  <span>Betalingen</span>
+                  <span>Posten</span>
+                </div>
+                <div className="divide-y divide-slate-50">
+                  {rows.length === 0 ? (
+                    <p className="text-xs text-slate-400 text-center py-4">Geen posten of betalingen.</p>
+                  ) : (
+                    rows.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-2 px-3.5 py-2 text-xs">
+                        <div className={row.payment ? "pr-2 border-r border-slate-50" : "pr-2 border-r border-slate-50 text-slate-300"}>
+                          {row.payment ? (
+                            <>
+                              <p className="text-slate-700 truncate">{row.payment.description}</p>
+                              <p className="text-slate-400">{row.payment.date} · {eur(row.payment.amount)} · {entityById[row.payment.entityId]?.name}</p>
+                            </>
+                          ) : "—"}
+                        </div>
+                        <div className="pl-2">
+                          {row.item ? (
+                            <>
+                              <p
+                                className="text-slate-700 truncate cursor-pointer hover:underline"
+                                onClick={() => onOpenDetail("item", row.item.id)}
+                              >
+                                {row.item.description}
+                              </p>
+                              <p className="text-slate-400">{row.item.dueDate} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
+                            </>
+                          ) : "—"}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+      filteredGroupList.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
         const totalIn = cpItems.length > 0
           ? cpItems.filter((i) => i.direction === "in").reduce((s, i) => s + i.amount, 0)
           : cpPayments.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
@@ -6541,7 +6627,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             )}
           </div>
         );
-      })}
+      })
+      )}
       {groups.zonder.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <button
