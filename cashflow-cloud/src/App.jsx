@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.88.0";
+const APP_VERSION = "1.89.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6077,10 +6077,57 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 
             return (
               <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
-                <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-sm font-medium text-slate-800">{counterparty.name}</span>
-                  <span className="text-[10px] text-slate-400">{counterparty.type || "Debiteur"}</span>
+                <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium text-slate-800 truncate">{counterparty.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => { setMergingFor(mergingFor === counterparty.id ? null : counterparty.id); setMergeTargetId(""); }}
+                      className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+                    >
+                      {mergingFor === counterparty.id ? "sluiten" : "mergen naar…"}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-slate-400 shrink-0">{counterparty.type || "Debiteur"}</span>
                 </div>
+                {mergingFor === counterparty.id && (
+                  <div className="px-3.5 py-3 space-y-2 bg-rose-50/40 border-b border-slate-100">
+                    <p className="text-[11px] text-slate-500">
+                      Verhuist alle posten <b>en</b> betalingen van "{counterparty.name}" naar de gekozen crediteur, en verwijdert "{counterparty.name}" nadien. Dit kan niet ongedaan gemaakt worden.
+                    </p>
+                    <select
+                      value={mergeTargetId}
+                      onChange={(e) => setMergeTargetId(e.target.value)}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                    >
+                      <option value="" disabled>Kies doel-crediteur…</option>
+                      {counterparties
+                        .filter((c) => c.id !== counterparty.id)
+                        .slice()
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!mergeTargetId) return;
+                          setMerging(true);
+                          await onMergeCounterparties(counterparty.id, mergeTargetId);
+                          setMerging(false);
+                          setMergingFor(null);
+                        }}
+                        disabled={!mergeTargetId || merging}
+                        className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+                      >
+                        {merging ? "Bezig…" : "Bevestig samenvoegen"}
+                      </button>
+                      <button type="button" onClick={() => setMergingFor(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                        Annuleer
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 text-[10px] uppercase tracking-wide text-slate-400 px-3.5 pt-2">
                   <span>Betalingen</span>
                   <span>Posten</span>
