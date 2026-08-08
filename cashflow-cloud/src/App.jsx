@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.92.0";
+const APP_VERSION = "1.93.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -7563,40 +7563,45 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                     onClick={(e) => e.stopPropagation()}
                     className="w-4 h-4 rounded border-slate-300 shrink-0"
                   />
-                  <div className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
-                    <p className="text-sm text-slate-800 truncate min-w-0">
-                      {p.description}
-                      {counterparty && (
-                        <>
-                          {" — "}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
-                            className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
-                          >
-                            {counterparty.name}
-                          </button>
-                        </>
-                      )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-slate-500 font-mono">
+                      {p.date}
+                      {p.volgnummer && <> · verrichting {p.volgnummer}</>}
                     </p>
-                    <span
-                      className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
-                        status === "linked"
-                          ? "bg-emerald-50 text-emerald-600"
-                          : status === "nodoc"
-                          ? "bg-slate-100 text-slate-500"
-                          : status === "transfer"
-                          ? "bg-sky-50 text-sky-600"
-                          : "bg-amber-50 text-amber-600"
-                      }`}
-                    >
-                      {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : status === "transfer" ? "Interne overschrijving" : "Ongekoppeld"}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-sm text-slate-800 truncate min-w-0">
+                        {p.description}
+                        {counterparty && (
+                          <>
+                            {" — "}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
+                              className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                            >
+                              {counterparty.name}
+                            </button>
+                          </>
+                        )}
+                      </p>
+                      <span
+                        className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
+                          status === "linked"
+                            ? "bg-emerald-50 text-emerald-600"
+                            : status === "nodoc"
+                            ? "bg-slate-100 text-slate-500"
+                            : status === "transfer"
+                            ? "bg-sky-50 text-sky-600"
+                            : "bg-amber-50 text-amber-600"
+                        }`}
+                      >
+                        {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : status === "transfer" ? "Interne overschrijving" : "Ongekoppeld"}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-end justify-between gap-2 mt-1 pl-[26px]">
                   <p className="text-[11px] text-slate-400 truncate min-w-0">
-                    {entity?.name} · {p.date} · {p.source}
-                    {p.volgnummer && <> · volgnr <span className="font-mono">{p.volgnummer}</span></>}
+                    {entity?.name} · {p.source}
                     {category && <> · {category.name}</>}
                     {project && <> · {project.name}</>}
                   </p>
