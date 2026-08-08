@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.90.1";
+const APP_VERSION = "1.91.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5693,6 +5693,46 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
+// Doorzoekbare doel-crediteur-kiezer voor "mergen naar…" — vervangt een kale
+// <select> die bij 150+ partijen onhandelbaar wordt. Toont gefilterde
+// suggesties terwijl je typt; klik op een resultaat zet de waarde vast.
+function MergeTargetPicker({ counterparties, excludeId, value, onChange }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = counterparties.find((c) => c.id === value);
+  const results = query.trim()
+    ? counterparties
+        .filter((c) => c.id !== excludeId && c.name.toLowerCase().includes(query.trim().toLowerCase()))
+        .slice(0, 8)
+    : [];
+  return (
+    <div className="relative">
+      <input
+        value={open ? query : selected?.name || query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); onChange(""); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Zoek doel-crediteur…"
+        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+      />
+      {open && results.length > 0 && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-sm max-h-48 overflow-y-auto">
+          {results.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onMouseDown={() => { onChange(c.id); setQuery(""); setOpen(false); }}
+              className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-slate-50"
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [collapsedInMatrix, setCollapsedInMatrix] = useState(() => new Set()); // matrix-modus: standaard uitgeklapt, per partij inklapbaar
@@ -6125,18 +6165,12 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     <p className="text-[11px] text-slate-500">
                       Verhuist alle posten <b>en</b> betalingen van "{counterparty.name}" naar de gekozen crediteur, en verwijdert "{counterparty.name}" nadien. Dit kan niet ongedaan gemaakt worden.
                     </p>
-                    <select
+                    <MergeTargetPicker
+                      counterparties={counterparties}
+                      excludeId={counterparty.id}
                       value={mergeTargetId}
-                      onChange={(e) => setMergeTargetId(e.target.value)}
-                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
-                    >
-                      <option value="" disabled>Kies doel-crediteur…</option>
-                      {counterparties
-                        .filter((c) => c.id !== counterparty.id)
-                        .slice()
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                      onChange={setMergeTargetId}
+                    />
                     <div className="flex gap-2">
                       <button
                         type="button"
@@ -6317,18 +6351,12 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     <p className="text-[11px] text-slate-500">
                       Verhuist alle posten <b>en</b> betalingen van "{counterparty.name}" naar de gekozen crediteur, en verwijdert "{counterparty.name}" nadien. Dit kan niet ongedaan gemaakt worden.
                     </p>
-                    <select
+                    <MergeTargetPicker
+                      counterparties={counterparties}
+                      excludeId={counterparty.id}
                       value={mergeTargetId}
-                      onChange={(e) => setMergeTargetId(e.target.value)}
-                      className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
-                    >
-                      <option value="" disabled>Kies doel-crediteur…</option>
-                      {counterparties
-                        .filter((c) => c.id !== counterparty.id)
-                        .slice()
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                      onChange={setMergeTargetId}
+                    />
                     <div className="flex gap-2">
                       <button
                         type="button"
