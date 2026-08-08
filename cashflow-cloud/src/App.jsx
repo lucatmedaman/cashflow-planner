@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.87.0";
+const APP_VERSION = "1.87.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6087,7 +6087,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                   {rows.length === 0 ? (
                     <p className="text-xs text-slate-400 text-center py-4">Geen posten of betalingen.</p>
                   ) : (
-                    rows.map((row, idx) => (
+                    rows.map((row, idx) => {
+                      let wasCreatedFromPayment = false;
+                      if (row.item?.bankSnapshot) {
+                        try {
+                          wasCreatedFromPayment = JSON.parse(row.item.bankSnapshot).wasCreated === true;
+                        } catch (e) {}
+                      }
+                      return (
                       <div key={idx} className="grid grid-cols-2 px-3.5 py-2 text-xs">
                         <div className={row.payment ? "pr-2 border-r border-slate-50" : "pr-2 border-r border-slate-50 text-slate-300"}>
                           {row.payment ? (
@@ -6101,17 +6108,21 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           {row.item ? (
                             <>
                               <p
-                                className="text-slate-700 truncate cursor-pointer hover:underline"
+                                className={`truncate cursor-pointer hover:underline ${wasCreatedFromPayment ? "text-orange-600" : "text-slate-700"}`}
                                 onClick={() => onOpenDetail("item", row.item.id)}
+                                title={wasCreatedFromPayment ? "Deze post is aangemaakt vanuit een betaling (herhalende post)" : undefined}
                               >
                                 {row.item.description}
                               </p>
                               <p className="text-slate-400">{row.item.dueDate} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
                             </>
+                          ) : row.payment?.noDocumentNeeded ? (
+                            <span className="text-emerald-500">✅</span>
                           ) : "—"}
                         </div>
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
