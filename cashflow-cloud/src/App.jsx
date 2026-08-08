@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.91.0";
+const APP_VERSION = "1.92.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2415,6 +2415,15 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
+  async function updateItemCounterparty(itemId, counterpartyId) {
+    try {
+      await atUpdate(TABLES.items, [{ id: itemId, fields: { DebiteurCrediteur: counterpartyId ? [counterpartyId] : [] } }]);
+      setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, counterpartyId } : i)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
 
   // Bulk-variant: wijst dezelfde crediteur toe aan een geselecteerde reeks
   // betalingen ineens — voor het opruimen van bv. "Zonder crediteur" in
@@ -4080,6 +4089,7 @@ export default function CashflowPlanner() {
           onDeletePayment={async (payment) => { await deletePayment(payment); setDetailTarget(null); }}
           onResolveCounterparty={resolveCounterpartyId}
           onUpdatePaymentCounterparty={updatePaymentCounterparty}
+          onUpdateItemCounterparty={updateItemCounterparty}
           onCounterpartyClick={goToCounterparty}
           onUpdateItemField={updateItemQuickField}
           onUpdatePaymentField={updatePaymentQuickField}
@@ -6935,7 +6945,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -6967,10 +6977,12 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 
   async function saveCounterparty() {
     const name = counterpartyInput.trim();
-    if (!name || !onResolveCounterparty || !onUpdatePaymentCounterparty) return;
+    if (!name || !onResolveCounterparty) return;
+    const updater = type === "item" ? onUpdateItemCounterparty : onUpdatePaymentCounterparty;
+    if (!updater) return;
     setSavingCounterparty(true);
     const id = await onResolveCounterparty(name);
-    await onUpdatePaymentCounterparty(record.id, id);
+    await updater(record.id, id);
     setSavingCounterparty(false);
     setCounterpartyInput("");
   }
@@ -7049,62 +7061,51 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
         <div>
           <EditableField label="Omschrijving" field="description" />
           <Row label="Boekhouding" value={entity?.name} />
-          {type === "item" ? (
-            <Row
-              label="Debiteur/crediteur"
-              value={
-                currentCounterparty ? (
-                  <button
-                    onClick={() => { onCounterpartyClick?.(currentCounterparty.id); onClose(); }}
-                    className="underline decoration-dotted hover:text-slate-900"
-                  >
-                    {currentCounterparty.name}
-                  </button>
-                ) : null
-              }
-            />
-          ) : (
-            <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-50">
-              <span className="text-[11px] text-slate-400 shrink-0 pt-1.5">Debiteur/crediteur</span>
-              <div className="flex-1 min-w-0">
-                {currentCounterparty ? (
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => { onCounterpartyClick?.(currentCounterparty.id); onClose(); }}
-                      className="text-xs text-slate-700 underline decoration-dotted hover:text-slate-900"
-                    >
-                      {currentCounterparty.name}
-                    </button>
-                    <button
-                      onClick={() => { setCounterpartyInput(currentCounterparty.name); onUpdatePaymentCounterparty(record.id, null); }}
-                      className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
-                    >
-                      wijzig
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5">
-                    <CounterpartyAutocomplete
-                      value={counterpartyInput}
-                      onChange={setCounterpartyInput}
-                      onKeyDown={(e) => e.key === "Enter" && saveCounterparty()}
-                      counterparties={counterparties || []}
-                      placeholder="Naam invullen…"
-                      className="flex-1 min-w-0"
-                      inputClassName="w-full border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400 text-right"
-                    />
-                    <button
-                      onClick={saveCounterparty}
-                      disabled={!counterpartyInput.trim() || savingCounterparty}
-                      className="text-[10px] bg-slate-900 text-white rounded px-2 py-1 shrink-0 disabled:opacity-40"
-                    >
-                      {savingCounterparty ? "…" : "Koppel"}
-                    </button>
-                  </div>
-                )}
+          {(() => {
+            const updater = type === "item" ? onUpdateItemCounterparty : onUpdatePaymentCounterparty;
+            return (
+              <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-50">
+                <span className="text-[11px] text-slate-400 shrink-0 pt-1.5">Debiteur/crediteur</span>
+                <div className="flex-1 min-w-0">
+                  {currentCounterparty ? (
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => { onCounterpartyClick?.(currentCounterparty.id); onClose(); }}
+                        className="text-xs text-slate-700 underline decoration-dotted hover:text-slate-900"
+                      >
+                        {currentCounterparty.name}
+                      </button>
+                      <button
+                        onClick={() => { setCounterpartyInput(currentCounterparty.name); updater?.(record.id, null); }}
+                        className="text-[10px] text-rose-400 underline decoration-dotted shrink-0"
+                      >
+                        wijzig
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <CounterpartyAutocomplete
+                        value={counterpartyInput}
+                        onChange={setCounterpartyInput}
+                        onKeyDown={(e) => e.key === "Enter" && saveCounterparty()}
+                        counterparties={counterparties || []}
+                        placeholder="Naam invullen…"
+                        className="flex-1 min-w-0"
+                        inputClassName="w-full border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400 text-right"
+                      />
+                      <button
+                        onClick={saveCounterparty}
+                        disabled={!counterpartyInput.trim() || savingCounterparty}
+                        className="text-[10px] bg-slate-900 text-white rounded px-2 py-1 shrink-0 disabled:opacity-40"
+                      >
+                        {savingCounterparty ? "…" : "Koppel"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           <EditableField label="Bedrag" field="amount" type="number" />
           <EditableField label="Richting" field="direction" type="select" options={[{ value: "in", label: "Inkomst" }, { value: "uit", label: "Uitgave" }]} />
           {type === "item" ? (
