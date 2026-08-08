@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.87.1";
+const APP_VERSION = "1.88.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3406,6 +3406,7 @@ export default function CashflowPlanner() {
             onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
             onUpdateType={updateCounterpartyType}
             onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
+            onToggleNoDocNeeded={toggleNoDocumentNeeded}
             onMergeCounterparties={mergeCounterparties}
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
             unusedCounterparties={unusedCounterparties}
@@ -3468,6 +3469,7 @@ export default function CashflowPlanner() {
                 onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
                 onUpdateType={updateCounterpartyType}
                 onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
+                onToggleNoDocNeeded={toggleNoDocumentNeeded}
                 onMergeCounterparties={mergeCounterparties}
                 onCleanupDuplicateGroup={cleanupDuplicateGroup}
                 unusedCounterparties={unusedCounterparties}
@@ -5691,7 +5693,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const cpPaymentsById = useMemo(() => {
     const map = {};
@@ -6094,6 +6096,17 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           wasCreatedFromPayment = JSON.parse(row.item.bankSnapshot).wasCreated === true;
                         } catch (e) {}
                       }
+                      // Ook oranje als de post via bank-import tot stand kwam (Bron-veld),
+                      // los van of BankSnapshot.wasCreated expliciet true was — dekt ook
+                      // oudere/andere bank-import-gevallen.
+                      const isSynthetic = wasCreatedFromPayment || row.item?.source === "Bank-import";
+                      const isRecurring = row.item && row.item.recurrence !== "once";
+                      const itemColorClass = isRecurring ? "text-sky-600" : isSynthetic ? "text-orange-600" : "text-slate-700";
+                      const itemTitle = isRecurring
+                        ? "Herhalende post"
+                        : isSynthetic
+                        ? "Deze post is aangemaakt vanuit een betaling (geen echte factuur)"
+                        : undefined;
                       return (
                       <div key={idx} className="grid grid-cols-2 px-3.5 py-2 text-xs">
                         <div className={row.payment ? "pr-2 border-r border-slate-50" : "pr-2 border-r border-slate-50 text-slate-300"}>
@@ -6101,6 +6114,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                             <>
                               <p className="text-slate-700 truncate">{row.payment.description}</p>
                               <p className="text-slate-400">{row.payment.date} · {eur(row.payment.amount)} · {entityById[row.payment.entityId]?.name}</p>
+                              {!row.item && !row.payment.noDocumentNeeded && (
+                                <button
+                                  onClick={() => onToggleNoDocNeeded(row.payment)}
+                                  className="text-[10px] text-slate-400 underline decoration-dotted mt-0.5"
+                                >
+                                  geen document nodig
+                                </button>
+                              )}
                             </>
                           ) : "—"}
                         </div>
@@ -6108,9 +6129,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           {row.item ? (
                             <>
                               <p
-                                className={`truncate cursor-pointer hover:underline ${wasCreatedFromPayment ? "text-orange-600" : "text-slate-700"}`}
+                                className={`truncate cursor-pointer hover:underline ${itemColorClass}`}
                                 onClick={() => onOpenDetail("item", row.item.id)}
-                                title={wasCreatedFromPayment ? "Deze post is aangemaakt vanuit een betaling (herhalende post)" : undefined}
+                                title={itemTitle}
                               >
                                 {row.item.description}
                               </p>
