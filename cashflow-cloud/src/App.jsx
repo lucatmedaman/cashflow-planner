@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.89.0";
+const APP_VERSION = "1.89.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6159,11 +6159,17 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         <div className={row.payment ? "pr-2 border-r border-slate-50" : "pr-2 border-r border-slate-50 text-slate-300"}>
                           {row.payment ? (
                             <>
-                              <p className="text-slate-700 truncate">{row.payment.description}</p>
+                              <p
+                                className="text-slate-700 truncate cursor-pointer hover:underline"
+                                onClick={() => onOpenDetail("payment", row.payment.id)}
+                                title="Klik om te bewerken"
+                              >
+                                {row.payment.description}
+                              </p>
                               <p className="text-slate-400">{row.payment.date} · {eur(row.payment.amount)} · {entityById[row.payment.entityId]?.name}</p>
                               {!row.item && !row.payment.noDocumentNeeded && (
                                 <button
-                                  onClick={() => onToggleNoDocNeeded(row.payment)}
+                                  onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(row.payment); }}
                                   className="text-[10px] text-slate-400 underline decoration-dotted mt-0.5"
                                 >
                                   geen document nodig
