@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.89.1";
+const APP_VERSION = "1.90.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5695,6 +5695,7 @@ function ReconciliationView({ items, entityById, counterpartyById, filteredEntit
 
 function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
+  const [collapsedInMatrix, setCollapsedInMatrix] = useState(() => new Set()); // matrix-modus: standaard uitgeklapt, per partij inklapbaar
   const cpPaymentsById = useMemo(() => {
     const map = {};
     for (const p of payments) map[p.id] = p;
@@ -6074,15 +6075,27 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               if (!usedPaymentIds.has(p.id)) rows.push({ date: p.date, payment: p, item: null });
             });
             rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+            const isCollapsed = collapsedInMatrix.has(counterparty.id);
 
             return (
               <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
-                <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2">
+                <div
+                  className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2 cursor-pointer"
+                  onClick={() =>
+                    setCollapsedInMatrix((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(counterparty.id)) next.delete(counterparty.id);
+                      else next.add(counterparty.id);
+                      return next;
+                    })
+                  }
+                >
                   <div className="flex items-center gap-2 min-w-0">
+                    <ChevronDown className={`w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
                     <span className="text-sm font-medium text-slate-800 truncate">{counterparty.name}</span>
                     <button
                       type="button"
-                      onClick={() => { setMergingFor(mergingFor === counterparty.id ? null : counterparty.id); setMergeTargetId(""); }}
+                      onClick={(e) => { e.stopPropagation(); setMergingFor(mergingFor === counterparty.id ? null : counterparty.id); setMergeTargetId(""); }}
                       className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
                     >
                       {mergingFor === counterparty.id ? "sluiten" : "mergen naar…"}
@@ -6128,6 +6141,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     </div>
                   </div>
                 )}
+                {!isCollapsed && (
+                <>
                 <div className="grid grid-cols-2 text-[10px] uppercase tracking-wide text-slate-400 px-3.5 pt-2">
                   <span>Betalingen</span>
                   <span>Posten</span>
@@ -6199,6 +6214,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     })
                   )}
                 </div>
+                </>
+                )}
               </div>
             );
           })}
