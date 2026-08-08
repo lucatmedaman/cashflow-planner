@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.90.0";
+const APP_VERSION = "1.90.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6055,6 +6055,23 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
       )}
       {viewMode === "matrix" ? (
         <div className="space-y-3">
+          <div className="flex gap-1.5 justify-end">
+            <button
+              type="button"
+              onClick={() => setCollapsedInMatrix(new Set())}
+              className="text-[11px] text-slate-500 underline decoration-dotted"
+            >
+              alles openklappen
+            </button>
+            <span className="text-[11px] text-slate-300">·</span>
+            <button
+              type="button"
+              onClick={() => setCollapsedInMatrix(new Set(filteredGroupList.map((g) => g.counterparty.id)))}
+              className="text-[11px] text-slate-500 underline decoration-dotted"
+            >
+              alles toeklappen
+            </button>
+          </div>
           {filteredGroupList.map(({ counterparty, items: cpItems, payments: cpPayments }) => {
             const paymentById = {};
             cpPayments.forEach((p) => (paymentById[p.id] = p));
