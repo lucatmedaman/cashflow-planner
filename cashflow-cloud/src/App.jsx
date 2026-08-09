@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.97.0";
+const APP_VERSION = "1.98.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6348,9 +6348,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           {row.payment ? (
                             <>
                               <p
-                                className="text-slate-700 truncate cursor-pointer hover:underline"
+                                className={`truncate cursor-pointer hover:underline ${row.payment.transferType ? "text-sky-600" : "text-slate-700"}`}
                                 onClick={() => onOpenDetail("payment", row.payment.id)}
-                                title="Klik om te bewerken"
+                                title={row.payment.transferType ? "Interne overschrijving" : "Klik om te bewerken"}
                               >
                                 {row.payment.description}
                               </p>
@@ -6885,7 +6885,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         // we een niet-gekoppelde betaling standaard als "geen document nodig"
                         // i.p.v. "ongekoppeld" — dit raakt niet het echte GeenDocumentNodig-veld,
                         // dus in Betalingen/Koppelen telt zo'n betaling nog gewoon als ongekoppeld.
-                        const status = (p.documentIds || []).length > 0 ? "linked" : "nodoc";
+                        const status = p.transferType ? "transfer" : (p.documentIds || []).length > 0 ? "linked" : "nodoc";
                         return (
                           <div
                             key={p.id}
@@ -6898,10 +6898,16 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                                 <span className="text-xs text-slate-400">{p.date}</span>
                                 <span
                                   className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
-                                    status === "linked" ? "bg-emerald-50 text-emerald-600" : status === "nodoc" ? "bg-slate-100 text-slate-500" : "bg-amber-50 text-amber-600"
+                                    status === "transfer"
+                                      ? "bg-sky-50 text-sky-600"
+                                      : status === "linked"
+                                      ? "bg-emerald-50 text-emerald-600"
+                                      : status === "nodoc"
+                                      ? "bg-slate-100 text-slate-500"
+                                      : "bg-amber-50 text-amber-600"
                                   }`}
                                 >
-                                  {status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
+                                  {status === "transfer" ? "Interne overschrijving" : status === "linked" ? "Gekoppeld" : status === "nodoc" ? "Geen document nodig" : "Ongekoppeld"}
                                 </span>
                               </div>
                               <p className="text-sm truncate text-slate-800">{p.description}</p>
