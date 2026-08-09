@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.95.0";
+const APP_VERSION = "1.96.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6159,6 +6159,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             });
             rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
             const isCollapsed = collapsedInMatrix.has(counterparty.id);
+            const unresolvedPayments = cpPayments.filter((p) => !usedPaymentIds.has(p.id) && !p.noDocumentNeeded);
 
             return (
               <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
@@ -6190,6 +6191,19 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     >
                       {mergingFor === counterparty.id ? "sluiten" : "mergen naar…"}
                     </button>
+                    {unresolvedPayments.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm(`${unresolvedPayments.length} betaling(en) zonder post markeren als "geen document nodig"?`)) return;
+                          for (const p of unresolvedPayments) await onToggleNoDocNeeded(p);
+                        }}
+                        className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+                      >
+                        alles geen document ({unresolvedPayments.length})
+                      </button>
+                    )}
                   </div>
                   <span className="text-[10px] text-slate-400 shrink-0">{counterparty.type || "Debiteur"}</span>
                 </div>
