@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.98.0";
+const APP_VERSION = "1.99.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3416,6 +3416,7 @@ export default function CashflowPlanner() {
             onUpdateType={updateCounterpartyType}
             onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
             onToggleNoDocNeeded={toggleNoDocumentNeeded}
+            onUpdatePaymentField={updatePaymentQuickField}
             onMergeCounterparties={mergeCounterparties}
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
             unusedCounterparties={unusedCounterparties}
@@ -3479,6 +3480,7 @@ export default function CashflowPlanner() {
                 onUpdateType={updateCounterpartyType}
                 onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
                 onToggleNoDocNeeded={toggleNoDocumentNeeded}
+                onUpdatePaymentField={updatePaymentQuickField}
                 onMergeCounterparties={mergeCounterparties}
                 onCleanupDuplicateGroup={cleanupDuplicateGroup}
                 unusedCounterparties={unusedCounterparties}
@@ -5743,7 +5745,7 @@ function MergeTargetPicker({ counterparties, excludeId, value, onChange }) {
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onUpdatePaymentField, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [collapsedInMatrix, setCollapsedInMatrix] = useState(() => new Set()); // matrix-modus: standaard uitgeklapt, per partij inklapbaar
   const cpPaymentsById = useMemo(() => {
@@ -6160,6 +6162,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
             const isCollapsed = collapsedInMatrix.has(counterparty.id);
             const unresolvedPayments = cpPayments.filter((p) => !usedPaymentIds.has(p.id) && !p.noDocumentNeeded);
+            const nonTransferPayments = cpPayments.filter((p) => !p.transferType);
 
             return (
               <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
@@ -6277,6 +6280,18 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         className="w-full text-left text-xs text-slate-600 underline decoration-dotted pt-1"
                       >
                         Alle {unresolvedPayments.length} betaling(en) zonder post: geen document nodig
+                      </button>
+                    )}
+                    {nonTransferPayments.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!window.confirm(`${nonTransferPayments.length} betaling(en) van "${counterparty.name}" markeren als interne overschrijving?`)) return;
+                          for (const p of nonTransferPayments) await onUpdatePaymentField(p.id, "transferType", "Andere");
+                        }}
+                        className="w-full text-left text-xs text-sky-600 underline decoration-dotted pt-1"
+                      >
+                        Alle {nonTransferPayments.length} betaling(en): markeer als interne overschrijving
                       </button>
                     )}
                   </div>
