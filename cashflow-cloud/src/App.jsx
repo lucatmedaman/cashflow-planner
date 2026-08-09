@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.93.0";
+const APP_VERSION = "1.94.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5772,7 +5772,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [newCorrectName, setNewCorrectName] = useState("");
   const [newMatchType, setNewMatchType] = useState("Bevat");
   const [cpTypeFilter, setCpTypeFilter] = useState(initialTypeFilter || "all"); // all | Debiteur | Crediteur
+  const [openOnly, setOpenOnly] = useState(false);
   const [viewMode, setViewMode] = useState("lijst"); // lijst | matrix
+  const [matrixLinkSelection, setMatrixLinkSelection] = useState(null); // { counterpartyId, payment }
 
   useEffect(() => {
     if (!jumpToCounterpartyId) return;
@@ -5819,7 +5821,13 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
         // niet meer afgeleid uit in/uit-totalen — "Debiteur" als veilige
         // fallback voor partijen waar het veld nog niet gezet is.
         const type = g.counterparty.type || "Debiteur";
-        return { ...g, totalIn, totalUit, type };
+        // "Openstaand": minstens 1 post zonder gekoppelde betaling, of 1
+        // betaling zonder gekoppeld document én niet gemarkeerd als "geen
+        // document nodig" — zelfde definitie als de matrix-weergave gebruikt.
+        const hasOpenItem = g.items.some((i) => (i.paymentIds || []).length === 0);
+        const hasOpenPayment = g.payments.some((p) => (p.documentIds || []).length === 0 && !p.noDocumentNeeded);
+        const open = hasOpenItem || hasOpenPayment;
+        return { ...g, totalIn, totalUit, type, open };
       })
       .sort((a, b) => a.counterparty.name.localeCompare(b.counterparty.name));
     return { list, zonder };
@@ -6044,9 +6052,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
     </div>
   );
 
-  const filteredGroupList = groups.list.filter(
-    (g) => cpTypeFilter === "all" || g.type === cpTypeFilter
-  );
+  const filteredGroupList = groups.list
+    .filter((g) => cpTypeFilter === "all" || g.type === cpTypeFilter)
+    .filter((g) => !openOnly || g.open);
 
   if (groups.list.length === 0) {
     return (
@@ -6082,6 +6090,14 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               {f.label} ({f.key === "all" ? groups.list.length : groups.list.filter((g) => g.type === f.key).length})
             </button>
           ))}
+          <button
+            onClick={() => setOpenOnly((v) => !v)}
+            className={`px-2.5 py-1 rounded-md border text-xs ${
+              openOnly ? "bg-amber-500 text-white border-amber-500" : "bg-white border-slate-200 text-slate-500"
+            }`}
+          >
+            Enkel openstaande ({groups.list.filter((g) => g.open && (cpTypeFilter === "all" || g.type === cpTypeFilter)).length})
+          </button>
         </div>
         <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
           <button
@@ -6230,8 +6246,9 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         : isSynthetic
                         ? "Deze post is aangemaakt vanuit een betaling (geen echte factuur)"
                         : undefined;
+                      const isSelected = matrixLinkSelection?.payment.id === row.payment?.id && matrixLinkSelection?.counterpartyId === counterparty.id;
                       return (
-                      <div key={idx} className="grid grid-cols-2 px-3.5 py-2 text-xs">
+                      <div key={idx} className={`grid grid-cols-2 px-3.5 py-2 text-xs ${isSelected ? "bg-sky-50" : ""}`}>
                         <div className={row.payment ? "pr-2 border-r border-slate-50" : "pr-2 border-r border-slate-50 text-slate-300"}>
                           {row.payment ? (
                             <>
@@ -6243,13 +6260,26 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                                 {row.payment.description}
                               </p>
                               <p className="text-slate-400">{row.payment.date} · {eur(row.payment.amount)} · {entityById[row.payment.entityId]?.name}</p>
-                              {!row.item && !row.payment.noDocumentNeeded && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(row.payment); }}
-                                  className="text-[10px] text-slate-400 underline decoration-dotted mt-0.5"
-                                >
-                                  geen document nodig
-                                </button>
+                              {!row.item && (
+                                <div className="flex gap-2 mt-0.5">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setMatrixLinkSelection(isSelected ? null : { counterpartyId: counterparty.id, payment: row.payment });
+                                    }}
+                                    className={`text-[10px] underline decoration-dotted ${isSelected ? "text-sky-600" : "text-slate-400"}`}
+                                  >
+                                    {isSelected ? "geselecteerd — klik post om te koppelen" : "koppel…"}
+                                  </button>
+                                  {!row.payment.noDocumentNeeded && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); onToggleNoDocNeeded(row.payment); }}
+                                      className="text-[10px] text-slate-400 underline decoration-dotted"
+                                    >
+                                      geen document nodig
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </>
                           ) : "—"}
@@ -6268,7 +6298,22 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                             </>
                           ) : row.payment?.noDocumentNeeded ? (
                             <span className="text-emerald-500">✅</span>
-                          ) : "—"}
+                          ) : matrixLinkSelection && matrixLinkSelection.counterpartyId === counterparty.id ? (
+                            <span className="text-slate-300">— geen post hier</span>
+                          ) : (
+                            "—"
+                          )}
+                          {!row.payment && matrixLinkSelection?.counterpartyId === counterparty.id && row.item && (row.item.paymentIds || []).length === 0 && (
+                            <button
+                              onClick={async () => {
+                                await onLinkPayment(matrixLinkSelection.payment, row.item);
+                                setMatrixLinkSelection(null);
+                              }}
+                              className="block text-[10px] text-sky-600 underline decoration-dotted mt-0.5"
+                            >
+                              koppel hier
+                            </button>
+                          )}
                         </div>
                       </div>
                       );
