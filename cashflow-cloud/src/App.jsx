@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.94.0";
+const APP_VERSION = "1.95.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6178,6 +6178,13 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     <span className="text-sm font-medium text-slate-800 truncate">{counterparty.name}</span>
                     <button
                       type="button"
+                      onClick={(e) => { e.stopPropagation(); setEditDetailsFor(editDetailsFor === counterparty.id ? null : counterparty.id); }}
+                      className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+                    >
+                      {editDetailsFor === counterparty.id ? "sluiten" : "bewerken"}
+                    </button>
+                    <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); setMergingFor(mergingFor === counterparty.id ? null : counterparty.id); setMergeTargetId(""); }}
                       className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
                     >
@@ -6186,6 +6193,81 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                   </div>
                   <span className="text-[10px] text-slate-400 shrink-0">{counterparty.type || "Debiteur"}</span>
                 </div>
+                {editDetailsFor === counterparty.id && (
+                  <div className="px-3.5 py-3 space-y-2 bg-slate-50/60 border-b border-slate-100" onClick={(e) => e.stopPropagation()}>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Naam</label>
+                      <input
+                        value={counterparty.name}
+                        onChange={(e) => onUpdateFieldLocal(counterparty.id, "name", e.target.value)}
+                        onBlur={() => onCommitField(counterparty.id, "name")}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[11px] text-slate-400">BTW-nummer</label>
+                        <input
+                          value={counterparty.vatNumber || ""}
+                          onChange={(e) => onUpdateFieldLocal(counterparty.id, "vatNumber", e.target.value)}
+                          onBlur={() => onCommitField(counterparty.id, "vatNumber")}
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400">Rekeningnummer</label>
+                        <input
+                          value={counterparty.accountNumber || ""}
+                          onChange={(e) => onUpdateFieldLocal(counterparty.id, "accountNumber", e.target.value)}
+                          onBlur={() => onCommitField(counterparty.id, "accountNumber")}
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono outline-none focus:border-slate-400 bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Adres</label>
+                      <input
+                        value={counterparty.address || ""}
+                        onChange={(e) => onUpdateFieldLocal(counterparty.id, "address", e.target.value)}
+                        onBlur={() => onCommitField(counterparty.id, "address")}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Type</label>
+                      <select
+                        value={counterparty.type || "Debiteur"}
+                        onChange={(e) => onUpdateType(counterparty.id, e.target.value)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="Debiteur">Debiteur</option>
+                        <option value="Crediteur">Crediteur</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-400">Standaard betaalrekening (optioneel)</label>
+                      <select
+                        value={counterparty.defaultAccountId || ""}
+                        onChange={(e) => onUpdateDefaultAccount(counterparty.id, e.target.value || null)}
+                        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+                      >
+                        <option value="">Geen vaste rekening — telkens kiezen</option>
+                        {entities.map((e) => (
+                          <option key={e.id} value={e.id}>{e.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
+                      <input
+                        type="checkbox"
+                        checked={!!counterparty.noDocDefault}
+                        onChange={(e) => onToggleNoDocDefault(counterparty.id, e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300"
+                      />
+                      Nieuwe betalingen van deze crediteur zijn standaard "geen document nodig"
+                    </label>
+                  </div>
+                )}
                 {mergingFor === counterparty.id && (
                   <div className="px-3.5 py-3 space-y-2 bg-rose-50/40 border-b border-slate-100">
                     <p className="text-[11px] text-slate-500">
