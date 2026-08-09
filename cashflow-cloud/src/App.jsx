@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.96.1";
+const APP_VERSION = "1.97.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -7130,6 +7130,8 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
   let snapshot = null;
   if (type === "item" && record.bankSnapshot) {
     try { snapshot = JSON.parse(record.bankSnapshot); } catch (e) {}
+  } else if (type === "payment" && record.raw) {
+    snapshot = record.raw;
   }
 
   function Row({ label, value }) {
