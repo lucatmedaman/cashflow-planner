@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.96.0";
+const APP_VERSION = "1.96.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6191,19 +6191,6 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                     >
                       {mergingFor === counterparty.id ? "sluiten" : "mergen naar…"}
                     </button>
-                    {unresolvedPayments.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!window.confirm(`${unresolvedPayments.length} betaling(en) zonder post markeren als "geen document nodig"?`)) return;
-                          for (const p of unresolvedPayments) await onToggleNoDocNeeded(p);
-                        }}
-                        className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
-                      >
-                        alles geen document ({unresolvedPayments.length})
-                      </button>
-                    )}
                   </div>
                   <span className="text-[10px] text-slate-400 shrink-0">{counterparty.type || "Debiteur"}</span>
                 </div>
@@ -6280,6 +6267,18 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                       />
                       Nieuwe betalingen van deze crediteur zijn standaard "geen document nodig"
                     </label>
+                    {unresolvedPayments.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!window.confirm(`${unresolvedPayments.length} betaling(en) zonder post markeren als "geen document nodig"?`)) return;
+                          for (const p of unresolvedPayments) await onToggleNoDocNeeded(p);
+                        }}
+                        className="w-full text-left text-xs text-slate-600 underline decoration-dotted pt-1"
+                      >
+                        Alle {unresolvedPayments.length} betaling(en) zonder post: geen document nodig
+                      </button>
+                    )}
                   </div>
                 )}
                 {mergingFor === counterparty.id && (
