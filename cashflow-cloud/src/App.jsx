@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.2.1";
+const APP_VERSION = "2.3.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -834,8 +834,8 @@ export default function CashflowPlanner() {
   // scherm (Planning, Crediteuren, Koppelen) geopend worden om alle velden
   // van één post of betaling te bekijken, met doorklikbare koppelingen.
   const [detailTarget, setDetailTarget] = useState(null);
-  function openDetail(type, id) {
-    setDetailTarget({ type, id });
+  function openDetail(type, id, occurrenceDate) {
+    setDetailTarget({ type, id, occurrenceDate: occurrenceDate || null });
   }
   const [copyMsg, setCopyMsg] = useState("");
 
@@ -4257,6 +4257,7 @@ export default function CashflowPlanner() {
           projects={projects}
           onClose={() => setDetailTarget(null)}
           onOpenDetail={openDetail}
+          onTogglePaid={markOccurrencePaid}
           onEditItem={(item) => { startEdit(item); setView("planning"); setDetailTarget(null); }}
           onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
           onUnlinkPayment={unlinkPaymentFromDocument}
@@ -4418,7 +4419,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
 
       <div className="flex items-center justify-end gap-0.5 mt-1">
         {onOpenDetail && (
-          <button onClick={() => onOpenDetail("item", row.itemId)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Alle details bekijken">
+          <button onClick={() => onOpenDetail("item", row.itemId, row.date)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Alle details bekijken">
             <Eye className="w-3.5 h-3.5" />
           </button>
         )}
@@ -7336,7 +7337,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onTogglePaid }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -7450,6 +7451,22 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           </h3>
           <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
         </div>
+
+        {type === "item" && record?.recurrence !== "once" && target.occurrenceDate && (
+          <div className="mb-3 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+            <p className="text-xs text-sky-700">
+              Je bekijkt de <b>{target.occurrenceDate}</b>-occurrence van deze herhalende post — niet de vaste ankerdatum ({record.dueDate}) hieronder.
+            </p>
+            {onTogglePaid && (
+              <button
+                onClick={() => onTogglePaid(record.id, target.occurrenceDate)}
+                className="mt-1.5 text-xs text-sky-700 underline decoration-dotted"
+              >
+                Betaling voor déze occurrence koppelen/loskoppelen…
+              </button>
+            )}
+          </div>
+        )}
 
         <div>
           <EditableField label="Omschrijving" field="description" />
