@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.6.3";
+const APP_VERSION = "2.6.4";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6287,11 +6287,22 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             cpItems.forEach((item) => {
               const itemDate = item.payDate || item.dueDate;
               const linked = (item.paymentIds || []).map((pid) => paymentById[pid]).filter(Boolean);
+              // Voor elke gekoppelde betaling: welke occurrence-datum hoort erbij?
+              // (bij een herhalende post kan elke maand een andere, eigen datum
+              // hebben — de vaste ankerdatum van het item is enkel een fallback
+              // voor eenmalige posten of als er geen match gevonden wordt.)
+              const paidOcc = item.recurrence !== "once" ? occurrencePaymentMap(item, paymentById) : null;
               if (linked.length === 0) {
                 rows.push({ date: itemDate, payment: null, item });
               } else {
                 linked.forEach((p) => {
-                  rows.push({ date: itemDate, payment: p, item });
+                  let occDate = itemDate;
+                  if (paidOcc) {
+                    for (const [d, pay] of paidOcc.entries()) {
+                      if (pay.id === p.id) { occDate = d; break; }
+                    }
+                  }
+                  rows.push({ date: occDate, payment: p, item });
                   usedPaymentIds.add(p.id);
                 });
               }
@@ -6299,7 +6310,6 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               // niet betaalde occurrence tonen — anders zie je in dit
               // scherm enkel het verleden, nooit wat er nog aankomt.
               if (item.recurrence !== "once") {
-                const paidOcc = occurrencePaymentMap(item, paymentById);
                 const today = todayISO();
                 const searchStart = item.dueDate < today ? item.dueDate : today;
                 const upcoming = generateOccurrences(item, searchStart, toISO(addDays(fromISO(today), 400)));
