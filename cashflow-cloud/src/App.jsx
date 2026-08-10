@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.5.0";
+const APP_VERSION = "2.6.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6294,6 +6294,18 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                   usedPaymentIds.add(p.id);
                 });
               }
+              // Prognose: bij een herhalende post ook de eerstvolgende, nog
+              // niet betaalde occurrence tonen — anders zie je in dit
+              // scherm enkel het verleden, nooit wat er nog aankomt.
+              if (item.recurrence !== "once") {
+                const paidOcc = occurrencePaymentMap(item, paymentById);
+                const today = todayISO();
+                const upcoming = generateOccurrences(item, today, toISO(addDays(fromISO(today), 400)));
+                const nextUnpaid = upcoming.find((o) => !paidOcc.has(o.date));
+                if (nextUnpaid) {
+                  rows.push({ date: nextUnpaid.date, payment: null, item, isForecast: true });
+                }
+              }
             });
             cpPayments.forEach((p) => {
               if (!usedPaymentIds.has(p.id)) rows.push({ date: p.date, payment: p, item: null });
@@ -6564,12 +6576,17 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                             <>
                               <p
                                 className={`truncate cursor-pointer hover:underline ${itemColorClass}`}
-                                onClick={() => onOpenDetail("item", row.item.id)}
+                                onClick={() => onOpenDetail("item", row.item.id, row.date)}
                                 title={itemTitle}
                               >
                                 {row.item.description}
+                                {row.isForecast && (
+                                  <span className="ml-1.5 text-[9px] font-medium uppercase tracking-wide text-violet-500 bg-violet-50 rounded px-1 py-0.5 align-middle">
+                                    verwacht
+                                  </span>
+                                )}
                               </p>
-                              <p className="text-slate-400">{row.item.payDate || row.item.dueDate} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
+                              <p className="text-slate-400">{row.date} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
                             </>
                           ) : row.payment?.noDocumentNeeded ? (
                             <span className="text-emerald-500">✅</span>
