@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.99.0";
+const APP_VERSION = "1.99.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6146,12 +6146,13 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             const usedPaymentIds = new Set();
             const rows = [];
             cpItems.forEach((item) => {
+              const itemDate = item.payDate || item.dueDate;
               const linked = (item.paymentIds || []).map((pid) => paymentById[pid]).filter(Boolean);
               if (linked.length === 0) {
-                rows.push({ date: item.dueDate, payment: null, item });
+                rows.push({ date: itemDate, payment: null, item });
               } else {
                 linked.forEach((p) => {
-                  rows.push({ date: item.dueDate, payment: p, item });
+                  rows.push({ date: itemDate, payment: p, item });
                   usedPaymentIds.add(p.id);
                 });
               }
@@ -6404,7 +6405,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                               >
                                 {row.item.description}
                               </p>
-                              <p className="text-slate-400">{row.item.dueDate} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
+                              <p className="text-slate-400">{row.item.payDate || row.item.dueDate} · {eur(row.item.amount)} · {entityById[row.item.entityId]?.name}</p>
                             </>
                           ) : row.payment?.noDocumentNeeded ? (
                             <span className="text-emerald-500">✅</span>
