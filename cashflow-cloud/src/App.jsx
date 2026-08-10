@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.5.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5885,7 +5885,7 @@ function MergeTargetPicker({ counterparties, excludeId, value, onChange }) {
 
 function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onUpdatePaymentFlag, onToggleNoDocNeeded, onUpdatePaymentField, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
-  const [collapsedInMatrix, setCollapsedInMatrix] = useState(() => new Set()); // matrix-modus: standaard uitgeklapt, per partij inklapbaar
+  const [expandedInMatrix, setExpandedInMatrix] = useState(() => new Set()); // matrix-modus: standaard ingeklapt, per partij uitklapbaar
   const cpPaymentsById = useMemo(() => {
     const map = {};
     for (const p of payments) map[p.id] = p;
@@ -5913,7 +5913,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [newMatchType, setNewMatchType] = useState("Bevat");
   const [cpTypeFilter, setCpTypeFilter] = useState(initialTypeFilter || "all"); // all | Debiteur | Crediteur
   const [openOnly, setOpenOnly] = useState(false);
-  const [viewMode, setViewMode] = useState("lijst"); // lijst | matrix
+  const [viewMode, setViewMode] = useState("matrix"); // lijst | matrix
   const [matrixLinkSelection, setMatrixLinkSelection] = useState(null); // { counterpartyId, payment }
 
   useEffect(() => {
@@ -6264,7 +6264,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
           <div className="flex gap-1.5 justify-end">
             <button
               type="button"
-              onClick={() => setCollapsedInMatrix(new Set())}
+              onClick={() => setExpandedInMatrix(new Set(filteredGroupList.map((g) => g.counterparty.id)))}
               className="text-[11px] text-slate-500 underline decoration-dotted"
             >
               alles openklappen
@@ -6272,7 +6272,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             <span className="text-[11px] text-slate-300">·</span>
             <button
               type="button"
-              onClick={() => setCollapsedInMatrix(new Set(filteredGroupList.map((g) => g.counterparty.id)))}
+              onClick={() => setExpandedInMatrix(new Set())}
               className="text-[11px] text-slate-500 underline decoration-dotted"
             >
               alles toeklappen
@@ -6299,7 +6299,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               if (!usedPaymentIds.has(p.id)) rows.push({ date: p.date, payment: p, item: null });
             });
             rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-            const isCollapsed = collapsedInMatrix.has(counterparty.id);
+            const isCollapsed = !expandedInMatrix.has(counterparty.id);
             const unresolvedPayments = cpPayments.filter((p) => !usedPaymentIds.has(p.id) && !p.noDocumentNeeded);
             const nonTransferPayments = cpPayments.filter((p) => !p.transferType);
 
@@ -6308,7 +6308,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                 <div
                   className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2 cursor-pointer"
                   onClick={() =>
-                    setCollapsedInMatrix((prev) => {
+                    setExpandedInMatrix((prev) => {
                       const next = new Set(prev);
                       if (next.has(counterparty.id)) next.delete(counterparty.id);
                       else next.add(counterparty.id);
