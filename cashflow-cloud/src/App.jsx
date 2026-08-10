@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.2.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -616,6 +616,72 @@ function parseVisaCsv(csvText) {
   return { iban: null, accountName: null, entries, closingBalance: null, closingBalanceDate: null };
 }
 
+// Derde CSV-variant: het (Engelstalige) kaartafschrift-exportformaat met
+// kopregel — puntkomma-gescheiden, elk veld gequote, datums als YYYYMMDD.
+// Herkenbaar aan kolommen als "Card number"/"Reference number". Gebruikt
+// "Statement Amount" (al omgerekend naar de afrekenvaluta) i.p.v.
+// "Transaction amount" (kan in vreemde valuta staan, bv. USD).
+function parseVisaStatementCsv(csvText) {
+  const clean = (s) => (s || "").trim().replace(/^"+|"+$/g, "").trim();
+  const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) throw new Error("CSV bevat geen gegevensrijen.");
+  const header = parseCsvLine(lines[0]).map((h) => clean(h).toLowerCase());
+  const col = (name) => header.findIndex((h) => h === name.toLowerCase());
+  const idx = {
+    boekingsdatum: col("Booking date"),
+    bedrag: col("Statement Amount"),
+    handelaar: col("Merchant name"),
+    stad: col("Town"),
+    land: col("Country"),
+    referentie: col("Reference number"),
+  };
+  if (idx.boekingsdatum < 0 || idx.bedrag < 0) {
+    throw new Error("Dit lijkt geen herkende Visa-kaartafschrift-CSV: verwachte kolommen (Booking date, Statement Amount) ontbreken.");
+  }
+
+  const seenRefs = new Set();
+  let dupCount = 0;
+  const entries = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cells = parseCsvLine(lines[i]).map(clean);
+    const rawDate = cells[idx.boekingsdatum] || "";
+    const dm = rawDate.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (!dm) continue;
+    const bookingDate = `${dm[1]}-${dm[2]}-${dm[3]}`;
+
+    const rawAmount = cells[idx.bedrag] || "";
+    const amountNum = parseFloat(rawAmount.replace(/\./g, "").replace(",", "."));
+    if (isNaN(amountNum)) continue;
+
+    const handelaar = idx.handelaar >= 0 ? cells[idx.handelaar] : "";
+    const stad = idx.stad >= 0 ? cells[idx.stad] : "";
+    const land = idx.land >= 0 ? cells[idx.land] : "";
+    const description = [handelaar, stad, land].filter(Boolean).join(" — ");
+
+    let ref = idx.referentie >= 0 && cells[idx.referentie] ? cells[idx.referentie] : `visastmt-${bookingDate}-${rawAmount}-${i}`;
+    if (seenRefs.has(ref)) {
+      dupCount++;
+      ref = `${ref}-dup${dupCount}`;
+    }
+    seenRefs.add(ref);
+
+    entries.push({
+      amount: Math.abs(amountNum),
+      direction: amountNum >= 0 ? "in" : "uit",
+      bookingDate,
+      ref,
+      counterpartyName: handelaar,
+      counterpartyIban: "",
+      remittance: description,
+      volgnummer: "",
+    });
+  }
+
+  entries.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : a.bookingDate > b.bookingDate ? 1 : 0));
+  return { iban: null, accountName: null, entries, closingBalance: null, closingBalanceDate: null };
+}
+
 function parseCamt053(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) {
@@ -1064,10 +1130,20 @@ export default function CashflowPlanner() {
       const text = await file.text();
       const isXml = text.trimStart().startsWith("<");
       const isCsv = !isXml && (/\.csv$/i.test(file.name) || text.includes(";") || text.includes(","));
-      // Twee CSV-varianten: de puntkomma-gescheiden zichtrekening-export
-      // (met kopregel) en de komma-gescheiden Visa/Mastercard-kaartexport
-      // (zonder kopregel, zonder Rekeningnummer-kolom).
-      const parsed = isXml ? parseCamt053(text) : text.includes(";") ? parseBankCsv(text) : parseVisaCsv(text);
+      // Drie CSV-varianten naast CAMT.053-XML:
+      // 1) zichtrekening-export (puntkomma, kopregel "Uitvoeringsdatum" e.d.)
+      // 2) Visa-kaartafschrift zonder kopregel (komma-gescheiden)
+      // 3) Visa-kaartafschrift MET kopregel, Engelstalig (puntkomma, "Card number" e.d.)
+      const firstLine = text.split(/\r?\n/, 1)[0]?.toLowerCase() || "";
+      const parsed = isXml
+        ? parseCamt053(text)
+        : firstLine.includes("uitvoeringsdatum")
+        ? parseBankCsv(text)
+        : firstLine.includes("card number") || firstLine.includes("reference number")
+        ? parseVisaStatementCsv(text)
+        : text.includes(";")
+        ? parseBankCsv(text)
+        : parseVisaCsv(text);
       if (!parsed.entries.length) {
         setBankError(isCsv
           ? "Geen geaccepteerde verrichtingen gevonden in deze CSV."
