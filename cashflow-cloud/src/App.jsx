@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.3.0";
+const APP_VERSION = "2.4.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -19,7 +19,6 @@ const VIEW_LABELS = {
   beheer: "Beheer",
 };
 const BEHEER_TABS = [
-  { key: "crediteuren", label: "Crediteuren" },
   { key: "afpunten", label: "Afpunten" },
   { key: "koppelen", label: "Koppelen" },
   { key: "betalingen", label: "Betalingen" },
@@ -758,7 +757,7 @@ export default function CashflowPlanner() {
 
   const [view, setView] = useState("planning"); // planning | budget | crediteuren | ...
   const [budgetTab, setBudgetTab] = useState("rapport"); // sub-tab binnen Budget: rapport | grafiek
-  const [beheerTab, setBeheerTab] = useState("crediteuren"); // sub-tab binnen Beheer
+  const [beheerTab, setBeheerTab] = useState("afpunten"); // sub-tab binnen Beheer
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef(null);
   const [showEntityMenu, setShowEntityMenu] = useState(false);
@@ -784,8 +783,7 @@ export default function CashflowPlanner() {
   function goToCounterparty(counterpartyId) {
     if (!counterpartyId) return;
     setJumpToCounterpartyId(counterpartyId);
-    setView("beheer");
-    setBeheerTab("crediteuren");
+    setView("debiteuren");
   }
   const [windowDays, setWindowDays] = useState(60);
   const [directionFilter, setDirectionFilter] = useState("all"); // all | in | uit — Planning én Betalingen
@@ -3282,7 +3280,7 @@ export default function CashflowPlanner() {
             )}
           </div>
 
-          {view === "beheer" && beheerTab === "crediteuren" && (
+          {view === "debiteuren" && (
             <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1.5 mt-2">
               {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
                 const targetId = counterpartyLetterIndex[letter];
@@ -3593,7 +3591,7 @@ export default function CashflowPlanner() {
             onCleanupDuplicateGroup={cleanupDuplicateGroup}
             unusedCounterparties={unusedCounterparties}
             onDeleteUnusedCounterparties={deleteUnusedCounterparties}
-            initialTypeFilter="Debiteur"
+            initialTypeFilter={jumpToCounterpartyId ? "all" : "Debiteur"}
           />
         ) : (
           <>
@@ -3615,51 +3613,7 @@ export default function CashflowPlanner() {
                 </button>
               ))}
             </div>
-            {beheerTab === "crediteuren" ? (
-              <CounterpartyView
-                items={items}
-                payments={payments}
-                counterparties={counterparties}
-                entities={sortedEntities}
-                entityById={entityById}
-                filteredEntityIds={filteredEntityIds}
-                onTogglePaid={markOccurrencePaid}
-                onEdit={startEdit}
-                onDelete={deleteItem}
-                onDuplicate={duplicateItem}
-                editingId={editingId}
-                form={form}
-                setForm={setForm}
-                onSubmit={submitForm}
-                onCancel={resetForm}
-                onApplyMappings={applyNameMappings}
-                nameMappings={nameMappings}
-                onAddMapping={addNameMapping}
-                onUpdateMappingLocal={updateNameMappingLocal}
-                onCommitMapping={commitNameMapping}
-                onDeleteMapping={deleteNameMapping}
-                jumpToCounterpartyId={jumpToCounterpartyId}
-                onJumpHandled={() => setJumpToCounterpartyId(null)}
-                onRelink={relinkBankEntry}
-                onMerge={mergeDuplicateItem}
-                onLinkPayment={linkPaymentToDocument}
-                onUnlinkPayment={unlinkPaymentFromDocument}
-                onOpenDetail={openDetail}
-                onUpdatePriority={updateCounterpartyPriority}
-                onUpdateFieldLocal={updateCounterpartyFieldLocal}
-                onCommitField={commitCounterpartyField}
-                onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
-                onUpdateType={updateCounterpartyType}
-                onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
-                onUpdatePaymentFlag={updateCounterpartyPaymentFlag}
-                onToggleNoDocNeeded={toggleNoDocumentNeeded}
-                onUpdatePaymentField={updatePaymentQuickField}
-                onMergeCounterparties={mergeCounterparties}
-                onCleanupDuplicateGroup={cleanupDuplicateGroup}
-                unusedCounterparties={unusedCounterparties}
-                onDeleteUnusedCounterparties={deleteUnusedCounterparties}
-              />
-            ) : beheerTab === "afpunten" ? (
+            {beheerTab === "afpunten" ? (
               <ReconciliationView
                 items={items}
                 entityById={entityById}
