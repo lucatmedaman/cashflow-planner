@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.0.3";
+const APP_VERSION = "2.1.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -541,6 +541,81 @@ function parseBankCsv(csvText) {
   return { iban, accountName: null, entries, closingBalance: null, closingBalanceDate: null };
 }
 
+// Simpele CSV-lijnparser die quoted velden respecteert (nodig voor de
+// Visa-CSV hieronder, waar het bedrag gequote is omdat het zelf een komma
+// bevat als decimaalteken — een kale split(",") zou dat stukbreken).
+function parseCsvLine(line) {
+  const cells = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ",") { cells.push(cur); cur = ""; }
+      else cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
+// Visa/Mastercard-kaartafschrift-CSV: komma-gescheiden, geen kopregel, geen
+// Rekeningnummer-kolom (kaartrekeningen hebben geen IBAN in deze export).
+// Kolommen: Transactiedatum, Valutadatum, Bedrag (gequote, komma-decimaal),
+// Munt, Omschrijving, Wisselkoers, Gerelateerde kost. Zonder IBAN kan de
+// boekhouding niet automatisch herkend worden — de gebruiker kiest die zelf
+// in de import-modal (bestaand gedrag, ongewijzigd).
+function parseVisaCsv(csvText) {
+  const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) throw new Error("CSV bevat geen gegevensrijen.");
+
+  const DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  const seenRefs = new Set();
+  let dupCount = 0;
+  const entries = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const cells = parseCsvLine(lines[i]);
+    const rawDate = (cells[0] || "").trim();
+    const dm = rawDate.match(DATE_RE);
+    if (!dm) continue; // slaat de "null,null,..."-rij en andere niet-datumrijen over
+
+    const bookingDate = `${dm[3]}-${dm[2].padStart(2, "0")}-${dm[1].padStart(2, "0")}`;
+
+    const rawAmount = (cells[2] || "").trim();
+    const amountNum = parseFloat(rawAmount.replace(/\./g, "").replace(",", "."));
+    if (isNaN(amountNum)) continue;
+
+    const description = (cells[4] || "").trim();
+    let ref = `visa-${bookingDate}-${rawAmount}-${i}`;
+    if (seenRefs.has(ref)) {
+      dupCount++;
+      ref = `${ref}-dup${dupCount}`;
+    }
+    seenRefs.add(ref);
+
+    entries.push({
+      amount: Math.abs(amountNum),
+      direction: amountNum >= 0 ? "in" : "uit",
+      bookingDate,
+      ref,
+      counterpartyName: description,
+      counterpartyIban: "",
+      remittance: description,
+      volgnummer: "",
+    });
+  }
+
+  entries.sort((a, b) => (a.bookingDate < b.bookingDate ? -1 : a.bookingDate > b.bookingDate ? 1 : 0));
+  return { iban: null, accountName: null, entries, closingBalance: null, closingBalanceDate: null };
+}
+
 function parseCamt053(xmlText) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
   if (doc.querySelector("parsererror")) {
@@ -987,8 +1062,12 @@ export default function CashflowPlanner() {
     setBankResult(null);
     try {
       const text = await file.text();
-      const isCsv = /\.csv$/i.test(file.name) || (!text.trimStart().startsWith("<") && text.includes(";"));
-      const parsed = isCsv ? parseBankCsv(text) : parseCamt053(text);
+      const isXml = text.trimStart().startsWith("<");
+      const isCsv = !isXml && (/\.csv$/i.test(file.name) || text.includes(";") || text.includes(","));
+      // Twee CSV-varianten: de puntkomma-gescheiden zichtrekening-export
+      // (met kopregel) en de komma-gescheiden Visa/Mastercard-kaartexport
+      // (zonder kopregel, zonder Rekeningnummer-kolom).
+      const parsed = isXml ? parseCamt053(text) : text.includes(";") ? parseBankCsv(text) : parseVisaCsv(text);
       if (!parsed.entries.length) {
         setBankError(isCsv
           ? "Geen geaccepteerde verrichtingen gevonden in deze CSV."
