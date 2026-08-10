@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.0.2";
+const APP_VERSION = "2.0.3";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -4141,7 +4141,17 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [chosenPaymentId, setChosenPaymentId] = useState("");
   const [linking, setLinking] = useState(false);
-  const paymentIds = row.item.paymentIds || [];
+  const paymentsByIdLocal = useMemo(() => {
+    const map = {};
+    (payments || []).forEach((p) => (map[p.id] = p));
+    return map;
+  }, [payments]);
+  // Enkel de betaling(en) die écht bij DEZE occurrence horen (via
+  // occurrencePaymentMap), niet gewoon alle betalingen ooit aan de post
+  // gekoppeld — anders toont een herhalende post op elke toekomstige
+  // occurrence-rij ook de betaling van een allang afgehandelde maand.
+  const rowPayment = occurrencePaymentMap(row.item, paymentsByIdLocal).get(row.date) || null;
+  const paymentIds = rowPayment ? [rowPayment.id] : [];
   const linkCandidates = (payments || [])
     .filter((p) => p.entityId === row.item.entityId && (p.documentIds || []).length === 0 && !p.noDocumentNeeded)
     .sort((a, b) => a.amount - b.amount);
