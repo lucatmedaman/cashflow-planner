@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.2.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -544,7 +544,7 @@ function parseBankCsv(csvText) {
 // Simpele CSV-lijnparser die quoted velden respecteert (nodig voor de
 // Visa-CSV hieronder, waar het bedrag gequote is omdat het zelf een komma
 // bevat als decimaalteken — een kale split(",") zou dat stukbreken).
-function parseCsvLine(line) {
+function parseCsvLine(line, sep = ",") {
   const cells = [];
   let cur = "";
   let inQuotes = false;
@@ -557,7 +557,7 @@ function parseCsvLine(line) {
       } else cur += ch;
     } else {
       if (ch === '"') inQuotes = true;
-      else if (ch === ",") { cells.push(cur); cur = ""; }
+      else if (ch === sep) { cells.push(cur); cur = ""; }
       else cur += ch;
     }
   }
@@ -625,7 +625,7 @@ function parseVisaStatementCsv(csvText) {
   const clean = (s) => (s || "").trim().replace(/^"+|"+$/g, "").trim();
   const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) throw new Error("CSV bevat geen gegevensrijen.");
-  const header = parseCsvLine(lines[0]).map((h) => clean(h).toLowerCase());
+  const header = parseCsvLine(lines[0], ";").map((h) => clean(h).toLowerCase());
   const col = (name) => header.findIndex((h) => h === name.toLowerCase());
   const idx = {
     boekingsdatum: col("Booking date"),
@@ -644,7 +644,7 @@ function parseVisaStatementCsv(csvText) {
   const entries = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const cells = parseCsvLine(lines[i]).map(clean);
+    const cells = parseCsvLine(lines[i], ";").map(clean);
     const rawDate = cells[idx.boekingsdatum] || "";
     const dm = rawDate.match(/^(\d{4})(\d{2})(\d{2})$/);
     if (!dm) continue;
