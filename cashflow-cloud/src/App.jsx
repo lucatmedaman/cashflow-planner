@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.6.1";
+const APP_VERSION = "2.6.2";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6596,7 +6596,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           ) : (
                             "—"
                           )}
-                          {!row.payment && matrixLinkSelection?.counterpartyId === counterparty.id && row.item && (row.item.paymentIds || []).length === 0 && (
+                          {!row.payment && matrixLinkSelection?.counterpartyId === counterparty.id && row.item && (
                             <button
                               onClick={async () => {
                                 await onLinkPayment(matrixLinkSelection.payment, row.item);
