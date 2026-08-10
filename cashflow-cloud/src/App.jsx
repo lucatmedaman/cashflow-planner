@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.6.0";
+const APP_VERSION = "2.6.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -6300,7 +6300,8 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
               if (item.recurrence !== "once") {
                 const paidOcc = occurrencePaymentMap(item, paymentById);
                 const today = todayISO();
-                const upcoming = generateOccurrences(item, today, toISO(addDays(fromISO(today), 400)));
+                const searchStart = item.dueDate < today ? item.dueDate : today;
+                const upcoming = generateOccurrences(item, searchStart, toISO(addDays(fromISO(today), 400)));
                 const nextUnpaid = upcoming.find((o) => !paidOcc.has(o.date));
                 if (nextUnpaid) {
                   rows.push({ date: nextUnpaid.date, payment: null, item, isForecast: true });
