@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.6.2";
+const APP_VERSION = "2.6.3";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -5919,6 +5919,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   useEffect(() => {
     if (!jumpToCounterpartyId) return;
     setOpenId(jumpToCounterpartyId);
+    setExpandedInMatrix((prev) => new Set(prev).add(jumpToCounterpartyId));
     const el = document.getElementById(`crediteur-${jumpToCounterpartyId}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     onJumpHandled?.();
@@ -6317,7 +6318,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
             const nonTransferPayments = cpPayments.filter((p) => !p.transferType);
 
             return (
-              <div key={counterparty.id} className="bg-white rounded-xl border border-slate-100">
+              <div key={counterparty.id} id={`crediteur-${counterparty.id}`} className="bg-white rounded-xl border border-slate-100">
                 <div
                   className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between gap-2 cursor-pointer"
                   onClick={() =>
