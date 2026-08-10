@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "1.99.1";
+const APP_VERSION = "2.0.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -310,6 +310,8 @@ function counterpartyFromRecord(r) {
     noDocDefault: !!r.fields.StandaardGeenDocumentNodig,
     type: r.fields.Debiteuren_Crediteuren || "Debiteur",
     defaultAccountId: (r.fields.StandaardBetaalrekening || [])[0] || null,
+    isDomiciliering: !!r.fields.Domiciliering,
+    isDoorlopendeOpdracht: !!r.fields.DoorlopendeOpdracht,
   };
 }
 
@@ -2401,6 +2403,16 @@ export default function CashflowPlanner() {
       setAirtableError(err.message);
     }
   }
+  async function updateCounterpartyPaymentFlag(id, key, value) {
+    const airtableField = key === "isDomiciliering" ? "Domiciliering" : "DoorlopendeOpdracht";
+    setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, [key]: value } : c)));
+    try {
+      await atUpdate(TABLES.counterparties, [{ id, fields: { [airtableField]: value } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
 
   // Wijst een debiteur/crediteur toe aan een bestaande Betaling — nodig
   // omdat het "+ Nieuwe betaling"-formulier dit al kon instellen bij
@@ -3415,6 +3427,7 @@ export default function CashflowPlanner() {
             onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
             onUpdateType={updateCounterpartyType}
             onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
+            onUpdatePaymentFlag={updateCounterpartyPaymentFlag}
             onToggleNoDocNeeded={toggleNoDocumentNeeded}
             onUpdatePaymentField={updatePaymentQuickField}
             onMergeCounterparties={mergeCounterparties}
@@ -3479,6 +3492,7 @@ export default function CashflowPlanner() {
                 onToggleNoDocDefault={toggleCounterpartyNoDocDefault}
                 onUpdateType={updateCounterpartyType}
                 onUpdateDefaultAccount={updateCounterpartyDefaultAccount}
+                onUpdatePaymentFlag={updateCounterpartyPaymentFlag}
                 onToggleNoDocNeeded={toggleNoDocumentNeeded}
                 onUpdatePaymentField={updatePaymentQuickField}
                 onMergeCounterparties={mergeCounterparties}
@@ -5745,7 +5759,7 @@ function MergeTargetPicker({ counterparties, excludeId, value, onChange }) {
   );
 }
 
-function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onToggleNoDocNeeded, onUpdatePaymentField, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
+function CounterpartyView({ items, payments, counterparties, entities, entityById, filteredEntityIds, onTogglePaid, onEdit, onDelete, onDuplicate, editingId, form, setForm, onSubmit, onCancel, onApplyMappings, nameMappings, onAddMapping, onUpdateMappingLocal, onCommitMapping, onDeleteMapping, jumpToCounterpartyId, onJumpHandled, onRelink, onMerge, onLinkPayment, onUnlinkPayment, onOpenDetail, onUpdatePriority, onUpdateFieldLocal, onCommitField, onToggleNoDocDefault, onUpdateType, onUpdateDefaultAccount, onUpdatePaymentFlag, onToggleNoDocNeeded, onUpdatePaymentField, onMergeCounterparties, onCleanupDuplicateGroup, unusedCounterparties, onDeleteUnusedCounterparties, initialTypeFilter }) {
   const [openId, setOpenId] = useState(jumpToCounterpartyId || null);
   const [collapsedInMatrix, setCollapsedInMatrix] = useState(() => new Set()); // matrix-modus: standaard uitgeklapt, per partij inklapbaar
   const cpPaymentsById = useMemo(() => {
@@ -6181,6 +6195,12 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                   <div className="flex items-center gap-2 min-w-0">
                     <ChevronDown className={`w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
                     <span className="text-sm font-medium text-slate-800 truncate">{counterparty.name}</span>
+                    {counterparty.isDomiciliering && (
+                      <Landmark className="w-3.5 h-3.5 text-sky-500 shrink-0" title="Domiciliëring" />
+                    )}
+                    {counterparty.isDoorlopendeOpdracht && (
+                      <RotateCcw className="w-3.5 h-3.5 text-violet-500 shrink-0" title="Doorlopende opdracht" />
+                    )}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setEditDetailsFor(editDetailsFor === counterparty.id ? null : counterparty.id); }}
@@ -6261,6 +6281,26 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           <option key={e.id} value={e.id}>{e.name}</option>
                         ))}
                       </select>
+                    </div>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.isDomiciliering}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "isDomiciliering", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Domiciliëring
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.isDoorlopendeOpdracht}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "isDoorlopendeOpdracht", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Doorlopende opdracht
+                      </label>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
                       <input
@@ -6608,6 +6648,26 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           <option key={e.id} value={e.id}>{e.name}</option>
                         ))}
                       </select>
+                    </div>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.isDomiciliering}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "isDomiciliering", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Domiciliëring
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.isDoorlopendeOpdracht}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "isDoorlopendeOpdracht", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Doorlopende opdracht
+                      </label>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
                       <input
