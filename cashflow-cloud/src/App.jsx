@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.0.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -168,11 +168,15 @@ function occurrencePaymentMap(item, paymentsById) {
     return map;
   }
 
-  const tolerance = toleranceDaysFor(item.recurrence);
+  // Geen tolerantie-venster hier: als een Betaling al gekoppeld is (expliciet,
+  // via handmatig koppelen of "koppel hier"), telt ze altijd als betaling voor
+  // haar dichtstbijzijnde occurrence — ongeacht hoe ver de datum afwijkt.
+  // Tolerantie speelt enkel nog een rol bij het automatisch zoeken naar een
+  // geschikte occurrence om aan te koppelen (elders, bv. bank-import matching).
   for (const p of linked) {
     const pDate = fromISO(p.date);
-    const windowStart = toISO(addDays(pDate, -tolerance));
-    const windowEnd = toISO(addDays(pDate, tolerance));
+    const windowStart = toISO(addDays(pDate, -400));
+    const windowEnd = toISO(addDays(pDate, 400));
     const occ = generateOccurrences(item, windowStart, windowEnd);
     if (occ.length === 0) continue;
     const nearest = occ.slice().sort(
