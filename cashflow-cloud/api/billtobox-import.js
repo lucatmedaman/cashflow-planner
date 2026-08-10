@@ -99,26 +99,26 @@ function checkBasicAuth(req) {
   return { ok: user === expectedUser && pass === expectedPass, reason: "mismatch" };
 }
 
-// Schrijft een mislukte import als zichtbare "foutpost" in de Posten-tabel,
-// zodat een falende push nooit meer geruisloos verdwijnt (Vercel-logs
-// verlopen; Airtable niet). Lukt zelfs dát niet (bv. dood token), dan rest
-// enkel de HTTP-foutrespons die Billtobox in zijn Gebeurtenissen bewaart.
-//
 // Dedup: Billtobox herprobeert een mislukte push soms urenlang, elke paar
 // minuten opnieuw — zonder onderstaande check levert dat tientallen
-// identieke foutposten op voor dezelfde factuur op één dag. We zoeken eerst
-// naar een bestaande foutpost van vandaag met exact dezelfde boodschap
-// (die het factuurnummer bevat) en slaan het aanmaken dan over.
+// identieke foutposten op voor dezelfde factuur. We zoeken naar een
+// bestaande foutpost met exact dezelfde boodschap (die het factuurnummer
+// bevat) en slaan het aanmaken dan over — voor altijd, niet enkel vandaag
+// (een date-veld-stringvergelijking bleek in de praktijk onbetrouwbaar via
+// Airtable's filterByFormula, dus laten we die vergelijking bewust weg).
 async function logFailureToAirtable(step, message, targetEntityId, extra) {
   const today = new Date().toISOString().slice(0, 10);
   const fullMessage = `${message}${extra ? ` — ${extra}` : ""}`.slice(0, 1000);
   try {
-    const filterFormula = `AND({Bron}="Billtobox", {Opmerking}="${fullMessage.replace(/"/g, '\\"')}", {Datum}="${today}")`;
+    const filterFormula = `AND({Bron}="Billtobox", {Opmerking}="${fullMessage.replace(/"/g, '\\"')}")`;
     const checkRes = await fetch(
       `https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}?filterByFormula=${encodeURIComponent(filterFormula)}&maxRecords=1`,
       { headers: airtableHeaders() }
     );
     const checkData = await checkRes.json();
+    if (checkData.error) {
+      console.error("billtobox-import: filterByFormula-fout bij dedup-check:", JSON.stringify(checkData.error));
+    }
     if (checkData.records && checkData.records.length > 0) {
       console.log("billtobox-import: foutpost voor deze factuur bestaat al vandaag, aanmaken overgeslagen.");
       return true;
