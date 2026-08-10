@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.0.1";
+const APP_VERSION = "2.0.2";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -7798,18 +7798,18 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                     </p>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <p className="text-sm text-slate-800 truncate min-w-0">
-                        {p.description}
                         {counterparty && (
                           <>
-                            {" — "}
                             <button
                               onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
-                              className="text-slate-400 font-normal underline decoration-dotted hover:text-slate-600"
+                              className="text-slate-800 font-medium underline decoration-dotted hover:text-slate-600"
                             >
                               {counterparty.name}
                             </button>
+                            {" — "}
                           </>
                         )}
+                        {p.description}
                       </p>
                       <span
                         className={`text-[10px] font-medium rounded px-1.5 py-0.5 shrink-0 ${
