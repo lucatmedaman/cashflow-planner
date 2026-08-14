@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.6.4";
+const APP_VERSION = "2.7.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2616,6 +2616,9 @@ export default function CashflowPlanner() {
   async function mergeCounterparties(sourceId, targetId) {
     if (!sourceId || !targetId || sourceId === targetId) return;
     try {
+      const sourceCp = counterparties.find((c) => c.id === sourceId);
+      const targetCp = counterparties.find((c) => c.id === targetId);
+
       const affectedItems = items.filter((i) => i.counterpartyId === sourceId);
       for (const it of affectedItems) {
         await atUpdate(TABLES.items, [{ id: it.id, fields: { DebiteurCrediteur: [targetId] } }]);
@@ -2630,6 +2633,19 @@ export default function CashflowPlanner() {
       setPayments((prev) => prev.map((p) => (p.counterpartyId === sourceId ? { ...p, counterpartyId: targetId } : p)));
       setCounterparties((prev) => prev.filter((c) => c.id !== sourceId));
       markSynced();
+
+      // Voegt de weg-gemergede naam toe aan Naammapping (exacte match ->
+      // naam van de partij waarin gemerged is), zodat toekomstige imports
+      // met die oude naam voortaan automatisch naar de juiste partij wijzen
+      // i.p.v. telkens opnieuw een dubbel aan te maken.
+      if (sourceCp?.name && targetCp?.name && sourceCp.name !== targetCp.name) {
+        const alreadyExists = nameMappings.some(
+          (m) => m.pattern.trim().toLowerCase() === sourceCp.name.trim().toLowerCase()
+        );
+        if (!alreadyExists) {
+          await addNameMapping(sourceCp.name, targetCp.name, "Exact");
+        }
+      }
     } catch (err) {
       setAirtableError(err.message);
     }
