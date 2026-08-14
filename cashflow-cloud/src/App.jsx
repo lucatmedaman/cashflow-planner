@@ -11,17 +11,17 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.8.0";
+const APP_VERSION = "2.9.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
   debiteuren: "Debiteuren",
+  betalingen: "Betalingen",
   beheer: "Beheer",
 };
 const BEHEER_TABS = [
   { key: "afpunten", label: "Afpunten" },
   { key: "koppelen", label: "Koppelen" },
-  { key: "betalingen", label: "Betalingen" },
   { key: "boekhoudingen", label: "Boekhoudingen" },
 ];
 
@@ -3590,6 +3590,36 @@ export default function CashflowPlanner() {
               />
             )}
           </>
+        ) : view === "betalingen" ? (
+          <BetalingenView
+            payments={payments}
+            entityById={entityById}
+            counterpartyById={counterpartyById}
+            counterparties={counterparties}
+            filteredEntityIds={filteredEntityIds}
+            categories={categories}
+            projects={projects}
+            onOpenDetail={openDetail}
+            onDeletePayment={deletePayment}
+            onCounterpartyClick={goToCounterparty}
+            onResolveCounterparty={resolveCounterpartyId}
+            onBulkAssignCounterparty={bulkAssignCounterparty}
+            directionFilter={directionFilter}
+            setDirectionFilter={setDirectionFilter}
+            onOpenRecurringDraft={(payment) =>
+              setRecurringDraft({
+                payment,
+                entityId: payment.entityId,
+                counterparty: counterpartyById[payment.counterpartyId]?.name || payment.description,
+                counterpartyId: payment.counterpartyId || null,
+                description: payment.description,
+                amount: payment.amount,
+                dueDate: payment.date,
+                recurrence: "monthly",
+                endDate: "",
+              })
+            }
+          />
         ) : view === "debiteuren" ? (
           <CounterpartyView
             items={items}
@@ -3686,36 +3716,6 @@ export default function CashflowPlanner() {
                 onBackfill={backfillHistoricBankPayments}
                 onOpenDetail={openDetail}
                 onCounterpartyClick={goToCounterparty}
-              />
-            ) : beheerTab === "betalingen" ? (
-              <BetalingenView
-                payments={payments}
-                entityById={entityById}
-                counterpartyById={counterpartyById}
-                counterparties={counterparties}
-                filteredEntityIds={filteredEntityIds}
-                categories={categories}
-                projects={projects}
-                onOpenDetail={openDetail}
-                onDeletePayment={deletePayment}
-                onCounterpartyClick={goToCounterparty}
-                onResolveCounterparty={resolveCounterpartyId}
-                onBulkAssignCounterparty={bulkAssignCounterparty}
-                directionFilter={directionFilter}
-                setDirectionFilter={setDirectionFilter}
-                onOpenRecurringDraft={(payment) =>
-                  setRecurringDraft({
-                    payment,
-                    entityId: payment.entityId,
-                    counterparty: counterpartyById[payment.counterpartyId]?.name || payment.description,
-                    counterpartyId: payment.counterpartyId || null,
-                    description: payment.description,
-                    amount: payment.amount,
-                    dueDate: payment.date,
-                    recurrence: "monthly",
-                    endDate: "",
-                  })
-                }
               />
             ) : (
               <BoekhoudingenView
