@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.7.0";
+const APP_VERSION = "2.8.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -172,7 +172,17 @@ function occurrencePaymentMap(item, paymentsById) {
   // haar dichtstbijzijnde occurrence — ongeacht hoe ver de datum afwijkt.
   // Tolerantie speelt enkel nog een rol bij het automatisch zoeken naar een
   // geschikte occurrence om aan te koppelen (elders, bv. bank-import matching).
+  //
+  // pinnedOccurrence heeft voorrang op de datum-nabijheid-berekening: een
+  // laattijdige betaling die toevallig dichter bij een ándere occurrence ligt
+  // dan bij de bedoelde, zou anders fout toegewezen worden (bv. een betaling
+  // van 14/08 voor de factuur van 21/07 ligt dichter bij 21/08).
   for (const p of linked) {
+    if (p.pinnedOccurrence) {
+      const existing = map.get(p.pinnedOccurrence);
+      if (!existing || p.date >= existing.date) map.set(p.pinnedOccurrence, p);
+      continue;
+    }
     const pDate = fromISO(p.date);
     const windowStart = toISO(addDays(pDate, -400));
     const windowEnd = toISO(addDays(pDate, 400));
@@ -353,6 +363,7 @@ function paymentFromRecord(r) {
     counterpartyId: r.fields.DebiteurCrediteur?.[0] || null,
     documentIds: r.fields.GekoppeldeDocumenten || [],
     noDocumentNeeded: !!r.fields.GeenDocumentNodig,
+    pinnedOccurrence: r.fields.GekoppeldeOccurrence || null,
   };
 }
 function paymentToFields(payment) {
@@ -1476,21 +1487,33 @@ export default function CashflowPlanner() {
   // Koppelt een Betaling aan een Document: legt de wederzijdse link. De
   // betaalstatus (Planning/Crediteuren/Rapport) volgt automatisch uit deze
   // link via occurrencePaymentMap, geen apart veld meer om bij te werken.
-  async function linkPaymentToDocument(payment, doc) {
+  async function linkPaymentToDocument(payment, doc, occurrenceDate) {
     try {
       // Betaalstatus volgt nu automatisch uit de link zelf, via
       // occurrencePaymentMap — hier hoeft enkel de koppeling gelegd te
       // worden, geen aparte "betaalde datum" meer te worden bepaald.
+      // occurrenceDate (optioneel): pint de betaling expliciet aan een
+      // specifieke occurrence, ongeacht datum-nabijheid — nodig omdat een
+      // laattijdige betaling anders aan de verkeerde (dichtstbijzijnde)
+      // occurrence toegewezen kan worden.
       const newDocPaymentIds = [...(doc.paymentIds || []), payment.id];
       const newPaymentDocIds = [...(payment.documentIds || []), doc.id];
+      const paymentFields = { GekoppeldeDocumenten: newPaymentDocIds };
+      if (occurrenceDate) paymentFields.GekoppeldeOccurrence = occurrenceDate;
 
       await Promise.all([
         atUpdate(TABLES.items, [{ id: doc.id, fields: { Betalingen: newDocPaymentIds } }]),
-        atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]),
+        atUpdate(TABLES.payments, [{ id: payment.id, fields: paymentFields }]),
       ]);
 
       setItems((prev) => prev.map((i) => (i.id === doc.id ? { ...i, paymentIds: newDocPaymentIds } : i)));
-      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
+      setPayments((prev) =>
+        prev.map((p) =>
+          p.id === payment.id
+            ? { ...p, documentIds: newPaymentDocIds, pinnedOccurrence: occurrenceDate || p.pinnedOccurrence }
+            : p
+        )
+      );
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -1501,8 +1524,11 @@ export default function CashflowPlanner() {
     try {
       const doc = items.find((i) => i.id === docId);
       const newPaymentDocIds = (payment.documentIds || []).filter((id) => id !== docId);
-      await atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds } }]);
-      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds } : p)));
+      // Pin (GekoppeldeOccurrence) wordt mee opgeschoond — anders blijft een
+      // oude vastgepinde occurrence hangen als deze betaling later ergens
+      // anders opnieuw gekoppeld wordt.
+      await atUpdate(TABLES.payments, [{ id: payment.id, fields: { GekoppeldeDocumenten: newPaymentDocIds, GekoppeldeOccurrence: null } }]);
+      setPayments((prev) => prev.map((p) => (p.id === payment.id ? { ...p, documentIds: newPaymentDocIds, pinnedOccurrence: null } : p)));
       if (doc) {
         // Ontkoppelen van de link is genoeg — de occurrence-status volgt
         // meteen uit occurrencePaymentMap zodra deze Betaling niet meer in
@@ -6626,7 +6652,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           {!row.payment && matrixLinkSelection?.counterpartyId === counterparty.id && row.item && (
                             <button
                               onClick={async () => {
-                                await onLinkPayment(matrixLinkSelection.payment, row.item);
+                                await onLinkPayment(matrixLinkSelection.payment, row.item, row.date);
                                 setMatrixLinkSelection(null);
                               }}
                               className="block text-[10px] text-sky-600 underline decoration-dotted mt-0.5"
