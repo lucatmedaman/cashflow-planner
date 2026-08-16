@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.11.0";
+const APP_VERSION = "2.12.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -4345,6 +4345,7 @@ export default function CashflowPlanner() {
           onClose={() => setDetailTarget(null)}
           onOpenDetail={openDetail}
           onTogglePaid={markOccurrencePaid}
+          onToggleHidden={toggleOccurrenceHidden}
           onEditItem={(item) => { startEdit(item); setView("planning"); setDetailTarget(null); }}
           onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
           onUnlinkPayment={unlinkPaymentFromDocument}
@@ -7462,7 +7463,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onTogglePaid }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onTogglePaid, onToggleHidden }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -7529,12 +7530,20 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
     if (type === "item") onUpdateItemField(record.id, field, value);
     else onUpdatePaymentField(record.id, field, value);
   }
-  function EditableField({ label, field, type: inputType = "text", options }) {
+  function EditableField({ label, field, type: inputType = "text", options, copyable }) {
     const [local, setLocal] = useState(record[field] ?? "");
+    const [copied, setCopied] = useState(false);
     useEffect(() => { setLocal(record[field] ?? ""); }, [record[field]]);
     const commit = () => {
       const parsed = inputType === "number" ? Number(local) : local;
       if (parsed !== (record[field] ?? "")) updateField(field, parsed);
+    };
+    const copyToClipboard = async () => {
+      try {
+        await navigator.clipboard.writeText(String(record[field] ?? ""));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      } catch (e) {}
     };
     if (inputType === "select") {
       return (
@@ -7553,15 +7562,27 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
         <span className="text-[11px] text-slate-400 shrink-0">{label}</span>
-        <input
-          type={inputType}
-          step={inputType === "number" ? "0.01" : undefined}
-          value={local}
-          onChange={(e) => setLocal(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-          className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 w-36"
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            type={inputType}
+            step={inputType === "number" ? "0.01" : undefined}
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            className="text-xs text-right border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-slate-400 w-36"
+          />
+          {copyable && (
+            <button
+              type="button"
+              onClick={copyToClipboard}
+              className="text-[10px] text-slate-400 underline decoration-dotted shrink-0"
+              title="Kopieer naar klembord"
+            >
+              {copied ? "gekopieerd" : "kopieer"}
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -7592,6 +7613,28 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
             )}
           </div>
         )}
+
+        {type === "item" && onToggleHidden && (() => {
+          const occDate = target.occurrenceDate || record.dueDate;
+          const isHidden = (record.hiddenOccurrences || []).includes(occDate);
+          return (
+            <div className={`mb-3 rounded-lg px-3 py-2 border ${isHidden ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-100"}`}>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {isHidden && (
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-amber-700 bg-amber-100 rounded px-1.5 py-0.5">
+                    Verborgen tot koppeling
+                  </span>
+                )}
+                <button
+                  onClick={() => onToggleHidden(record.id, occDate)}
+                  className={`text-xs underline decoration-dotted ${isHidden ? "text-amber-700" : "text-slate-500"}`}
+                >
+                  {isHidden ? "Toon terug in Planning…" : "Ik betaalde dit al — verberg tot koppeling…"}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         <div>
           <EditableField label="Omschrijving" field="description" />
@@ -7655,8 +7698,8 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 options={RECURRENCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
               />
               <EditableField label="Einddatum" field="endDate" type="date" />
-              <EditableField label="Rekeningnummer" field="accountNumber" />
-              <EditableField label="Opmerking" field="note" />
+              <EditableField label="Rekeningnummer" field="accountNumber" copyable />
+              <EditableField label="Opmerking" field="note" copyable />
               <Row label="Via PayPal" value={record.viaPaypal ? "Ja" : null} />
               <Row label="Gelezen" value={record.read ? "Ja" : "Nee"} />
               <Row
