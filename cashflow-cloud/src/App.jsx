@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.13.0";
+const APP_VERSION = "2.14.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -4443,18 +4443,18 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
           )}
         </div>
         <p className={`text-sm truncate ${row.paid ? "line-through text-[#93999F]" : "text-[#12181F]"}`}>
-          {row.item.description}
           {counterparty && (
             <>
-              {" — "}
               <button
                 onClick={(e) => { e.stopPropagation(); onCounterpartyClick?.(counterparty.id); }}
-                className="text-[#5B6570] font-normal underline decoration-dotted hover:text-[#12181F]"
+                className="text-[#12181F] font-medium underline decoration-dotted hover:text-[#5B6570]"
               >
                 {counterparty.name}
               </button>
+              {" — "}
             </>
           )}
+          {row.item.description}
         </p>
         <p className="text-[11px] text-[#93999F] truncate">
           Verval: {row.date}
