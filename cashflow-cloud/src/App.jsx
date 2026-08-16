@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.10.0";
+const APP_VERSION = "2.11.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -410,6 +410,10 @@ function itemFromRecord(r) {
     projectId: r.fields.Project?.[0] || null,
     paymentIds: r.fields.Betalingen || [],
     priority: r.fields.Prioriteit || "",
+    hiddenOccurrences: (() => {
+      try { return r.fields.VerborgenTotKoppeling ? JSON.parse(r.fields.VerborgenTotKoppeling) : []; }
+      catch (e) { return []; }
+    })(),
   };
 }
 function itemToFields(item) {
@@ -807,6 +811,7 @@ export default function CashflowPlanner() {
   const [editingId, setEditingId] = useState(null);
   const [newEntityName, setNewEntityName] = useState("");
   const [showPaidHistory, setShowPaidHistory] = useState(false);
+  const [showHiddenList, setShowHiddenList] = useState(false);
   const [showOverdue, setShowOverdue] = useState(false);
 
   const emptyForm = {
@@ -2005,8 +2010,12 @@ export default function CashflowPlanner() {
     return rows;
   }, [items, filteredEntityIds, rangeStart, rangeEnd, paymentsById]);
 
+  const manuallyHiddenRows = occurrenceRows.filter(
+    (r) => !r.paid && (r.item.hiddenOccurrences || []).includes(r.date)
+  );
   const upcomingRows = occurrenceRows
     .filter((r) => !r.paid && r.displayDate <= rangeEnd)
+    .filter((r) => !(r.item.hiddenOccurrences || []).includes(r.date))
     .filter((r) => directionFilter === "all" || r.item.direction === directionFilter)
     .filter((r) => {
       if (!hideRecentlyDue) return true;
@@ -2848,6 +2857,26 @@ export default function CashflowPlanner() {
   // Betalingen, dus "betaald markeren" maakt/koppelt een echte Betaling i.p.v.
   // een los datumveld te zetten — elke betaalmarkering heeft nu altijd een
   // onderliggende Betaling-record (Bron: Handmatig indien hier aangemaakt).
+  // "Ik heb dit al betaald, verberg tot ik het koppel" — puur een
+  // weergave-vlag per occurrence, verandert niets aan betaalstatus of
+  // koppelingen. Nuttig voor de overbruggingsperiode tussen effectief
+  // betalen en het inlezen/koppelen van het bankuittreksel.
+  async function toggleOccurrenceHidden(itemId, date) {
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    const current = new Set(item.hiddenOccurrences || []);
+    if (current.has(date)) current.delete(date);
+    else current.add(date);
+    const next = Array.from(current);
+    setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, hiddenOccurrences: next } : i)));
+    try {
+      await atUpdate(TABLES.items, [{ id: itemId, fields: { VerborgenTotKoppeling: JSON.stringify(next) } }]);
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   async function markOccurrencePaid(itemId, date) {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
@@ -3456,7 +3485,7 @@ export default function CashflowPlanner() {
                           onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} />
+                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -3509,7 +3538,7 @@ export default function CashflowPlanner() {
                           onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} />
+                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -3565,6 +3594,34 @@ export default function CashflowPlanner() {
                 </div>
               )}
             </div>
+
+            {/* Manueel verborgen tot koppeling */}
+            {manuallyHiddenRows.length > 0 && (
+              <div className="mt-3">
+                <button
+                  onClick={() => setShowHiddenList((s) => !s)}
+                  className="text-xs text-amber-600 flex items-center gap-1"
+                >
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showHiddenList ? "rotate-180" : ""}`} />
+                  Verborgen tot koppeling ({manuallyHiddenRows.length})
+                </button>
+                {showHiddenList && (
+                  <div className="mt-2 space-y-1.5">
+                    {manuallyHiddenRows.map((r) => (
+                      <div key={`${r.itemId}-${r.date}-hidden`} className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
+                        <span className="text-slate-700 truncate">{r.item.description} · {r.date} · {eur(r.item.amount)}</span>
+                        <button
+                          onClick={() => toggleOccurrenceHidden(r.itemId, r.date)}
+                          className="text-amber-700 underline decoration-dotted shrink-0"
+                        >
+                          toon terug
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         ) : view === "budget" ? (
           <>
@@ -4321,7 +4378,7 @@ function SummaryCard({ label, value, tone, isCount }) {
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment, onOpenDetail }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment, onOpenDetail, onToggleHidden }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -4451,6 +4508,15 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         {onOpenDetail && (
           <button onClick={() => onOpenDetail("item", row.itemId, row.date)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]" title="Alle details bekijken">
             <Eye className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {!row.paid && onToggleHidden && (
+          <button
+            onClick={() => onToggleHidden(row.itemId, row.date)}
+            className="p-1 text-[10px] text-[#C7CCC9] hover:text-[#12181F] underline decoration-dotted"
+            title='Ik heb dit al betaald — verberg tot ik de betaling koppel'
+          >
+            verberg
           </button>
         )}
         {paymentIds.length === 0 && onLinkPayment && (
