@@ -281,6 +281,16 @@ export default async function handler(req, res) {
     const payeeAccountBlock = extractTag(paymentBlock, "PayeeFinancialAccount") || "";
     const iban = extractTag(payeeAccountBlock, "ID") || "";
 
+    // Factuur-omschrijving voor het Opmerking-veld: eerst de algemene
+    // <cbc:Note> op factuurniveau (meest bedoeld als vrije omschrijving),
+    // anders de naam/omschrijving van de eerste factuurregel. Valt terug op
+    // een generieke melding als geen van beide iets oplevert.
+    const invoiceNote = extractTag(xml, "Note");
+    const firstLineBlock = extractTag(xml, "InvoiceLine") || "";
+    const lineItemBlock = extractTag(firstLineBlock, "Item") || "";
+    const lineDescription = extractTag(lineItemBlock, "Description") || extractTag(lineItemBlock, "Name") || "";
+    const invoiceDescription = invoiceNote || lineDescription || "";
+
     // Dedup: dezelfde factuur (zelfde nummer + bedrag) niet twee keer
     // aanmaken — Billtobox kan een push herhalen, en tot nu toe was er geen
     // enkele bescherming daartegen (in tegenstelling tot bank-import en
@@ -309,7 +319,7 @@ export default async function handler(req, res) {
         Bedrag: amount,
         Rekeningnummer: iban || recurringMatch.fields.Rekeningnummer || "",
         Factuurdatum: issueDate || null,
-        Opmerking: `Bijgewerkt via Billtobox op ${new Date().toISOString().slice(0, 10)} — was een herhalende post, geen dubbele aangemaakt (factuur ${invoiceNumber}).`,
+        Opmerking: `${invoiceDescription ? invoiceDescription + " — " : ""}Bijgewerkt via Billtobox op ${new Date().toISOString().slice(0, 10)} — was een herhalende post, geen dubbele aangemaakt (factuur ${invoiceNumber}).`,
         BankRef: dedupRef,
       };
       const updateRes = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${TABLES.items}`, {
@@ -342,7 +352,9 @@ export default async function handler(req, res) {
       Boekhouding: [targetEntityId],
       DebiteurCrediteur: [counterpartyId],
       Rekeningnummer: iban,
-      Opmerking: "Automatisch geïmporteerd via Billtobox",
+      Opmerking: invoiceDescription
+        ? `${invoiceDescription} (automatisch geïmporteerd via Billtobox)`
+        : "Automatisch geïmporteerd via Billtobox",
       Bedrag: amount,
       Richting: "uit",
       Datum: dueDate,
