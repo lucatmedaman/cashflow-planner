@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.9.0";
+const APP_VERSION = "2.10.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -798,6 +798,11 @@ export default function CashflowPlanner() {
   }
   const [windowDays, setWindowDays] = useState(60);
   const [directionFilter, setDirectionFilter] = useState("all"); // all | in | uit — Planning én Betalingen
+  // Verbergt openstaande posten die pas heel recent vervallen zijn (bv. je
+  // hebt net betaald, maar de bank moet het uittreksel nog posten/inlezen)
+  // — voorkomt schijnbaar-openstaande items tijdens die overbruggingsperiode.
+  const [hideRecentlyDue, setHideRecentlyDue] = useState(false);
+  const [gracePeriodDays, setGracePeriodDays] = useState(5);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [newEntityName, setNewEntityName] = useState("");
@@ -2002,7 +2007,15 @@ export default function CashflowPlanner() {
 
   const upcomingRows = occurrenceRows
     .filter((r) => !r.paid && r.displayDate <= rangeEnd)
-    .filter((r) => directionFilter === "all" || r.item.direction === directionFilter);
+    .filter((r) => directionFilter === "all" || r.item.direction === directionFilter)
+    .filter((r) => {
+      if (!hideRecentlyDue) return true;
+      const graceStart = toISO(addDays(new Date(), -gracePeriodDays));
+      const today = todayISO();
+      // Verberg enkel het venster [vandaag - gracePeriodDays, vandaag] —
+      // écht achterstallige items (ouder dan de wachttijd) blijven zichtbaar.
+      return !(r.displayDate >= graceStart && r.displayDate <= today);
+    });
   const recentPaidRows = occurrenceRows
     .filter((r) => r.paid && r.displayDate >= toISO(addDays(new Date(), -14)))
     .filter((r) => directionFilter === "all" || r.item.direction === directionFilter)
@@ -3369,7 +3382,7 @@ export default function CashflowPlanner() {
               </div>
             </div>
 
-            <div className="flex gap-1 mt-2">
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
               {[
                 { key: "all", label: "Alle" },
                 { key: "in", label: "Inkomsten" },
@@ -3385,6 +3398,27 @@ export default function CashflowPlanner() {
                   {f.label}
                 </button>
               ))}
+              <span className="text-slate-200">·</span>
+              <button
+                onClick={() => setHideRecentlyDue((v) => !v)}
+                className={`px-2.5 py-1 rounded-md border text-xs ${
+                  hideRecentlyDue ? "bg-amber-500 text-white border-amber-500" : "bg-white border-slate-200 text-slate-500"
+                }`}
+                title="Verbergt openstaande posten die pas heel recent vervallen zijn — geeft de bank tijd om het uittreksel te posten voor het als achterstallig getoond wordt"
+              >
+                Verberg recent vervallen
+              </button>
+              {hideRecentlyDue && (
+                <select
+                  value={gracePeriodDays}
+                  onChange={(e) => setGracePeriodDays(Number(e.target.value))}
+                  className="text-xs border border-slate-200 rounded-md px-1.5 py-1 outline-none focus:border-slate-400 bg-white"
+                >
+                  {[2, 3, 5, 7, 10, 14].map((d) => (
+                    <option key={d} value={d}>{d} dagen</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* New-item form (trigger button now lives in the always-visible header) */}
