@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.12.0";
+const APP_VERSION = "2.13.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -7684,7 +7684,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               </div>
             );
           })()}
-          <EditableField label="Bedrag" field="amount" type="number" />
+          <EditableField label="Bedrag" field="amount" type="number" copyable />
           <EditableField label="Richting" field="direction" type="select" options={[{ value: "in", label: "Inkomst" }, { value: "uit", label: "Uitgave" }]} />
           {type === "item" ? (
             <>
