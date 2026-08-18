@@ -22,6 +22,13 @@
 // De API-paden hieronder ("/Cashflow-facturen-inlezen", ...) zijn relatief
 // aan die App-map.
 
+// Puur om Vercel's build-tracer te dwingen het pdfjs-dist-workerbestand mee
+// te bundelen: pdfjs zelf laadt dit pas dynamisch tijdens het parsen (zie
+// extractPdfText hieronder), en zo'n dynamische import wordt door de
+// tracer gemist — resultaat zonder deze regel: "Cannot find module
+// .../pdf.worker.mjs" pas bij een échte parse-aanroep in productie.
+import "pdfjs-dist/legacy/build/pdf.worker.mjs";
+
 const SOURCE_FOLDER = "/Cashflow-facturen-inlezen";
 const PROCESSED_FOLDER = `${SOURCE_FOLDER}/Verwerkt`;
 
