@@ -180,6 +180,14 @@ function parseUbl(rawXml) {
 //      geverifieerd vóór deze keuze, met deze rechtstreekse aanpak wél
 //      succesvol getest tegen twee verschillend gegenereerde test-PDF's. ----
 async function extractPdfText(buffer) {
+  // Defensieve polyfill: sommige PDF's (specifieke ingebedde lettertypes)
+  // laten pdfjs-dist ook in de "legacy"-Node-build alsnog DOMMatrix
+  // aanroepen. Niet nodig gebleken in mijn eigen testbestanden, maar wel de
+  // aanbevolen aanpak voor pdfjs-dist in Node — kost niets, dekt edge cases af.
+  if (typeof globalThis.DOMMatrix === "undefined") {
+    const { default: DOMMatrixPolyfill } = await import("dommatrix");
+    globalThis.DOMMatrix = DOMMatrixPolyfill;
+  }
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
   const doc = await loadingTask.promise;
