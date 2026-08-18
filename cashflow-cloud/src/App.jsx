@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.17.3";
+const APP_VERSION = "2.18.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2387,16 +2387,19 @@ export default function CashflowPlanner() {
     });
     setUblError("");
   }
-  // Verplaatst het Dropbox-bestand van deze draft naar de submap Verwerkt.
-  // Wordt aangeroepen NA succesvol aanmaken/bijwerken van de post — nooit
-  // ervoor, zodat een mislukte post-creatie het bestand niet "kwijt" maakt.
-  async function moveDropboxFileToVerwerkt(dropboxPath, dropboxNamespace) {
+  // Verplaatst het Dropbox-bestand van deze draft naar de submap Verwerkt,
+  // en hernoemt het meteen naar debiteur_YYYYMMDD_bedrag (YYYYMMDD =
+  // factuurdatum) — op basis van de gegevens die de gebruiker net bevestigd
+  // heeft in het reviewscherm. Wordt aangeroepen NA succesvol aanmaken van
+  // de post — nooit ervoor, zodat een mislukte post-creatie het bestand
+  // niet "kwijt" maakt.
+  async function moveDropboxFileToVerwerkt(dropboxPath, dropboxNamespace, renameInfo) {
     if (!dropboxPath) return;
     try {
       const res = await fetch("/api/dropbox-facturen-inlezen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move", path: dropboxPath, namespace: dropboxNamespace || undefined }),
+        body: JSON.stringify({ action: "move", path: dropboxPath, namespace: dropboxNamespace || undefined, renameInfo }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -2514,9 +2517,14 @@ export default function CashflowPlanner() {
       // naar Verwerkt, en meteen het volgende item in de wachtrij openen.
       const finishedDropboxPath = ublDraft.dropboxPath;
       const finishedDropboxNamespace = ublDraft.dropboxNamespace;
+      const finishedRenameInfo = {
+        counterparty: ublDraft.counterparty,
+        invoiceDate: ublDraft.invoiceDate, // YYYY-MM-DD, wordt server-side naar YYYYMMDD omgezet
+        amount: ublDraft.amount,
+      };
       setUblDraft(null);
       if (finishedDropboxPath) {
-        moveDropboxFileToVerwerkt(finishedDropboxPath, finishedDropboxNamespace);
+        moveDropboxFileToVerwerkt(finishedDropboxPath, finishedDropboxNamespace, finishedRenameInfo);
         openNextDropboxDraft();
       }
     } catch (err) {
