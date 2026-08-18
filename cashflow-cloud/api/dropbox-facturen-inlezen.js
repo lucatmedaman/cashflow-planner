@@ -44,67 +44,91 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-async function getCurrentAccountEmail(accessToken) {
+async function getAccountDiagnostics(accessToken) {
   try {
     const res = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     const data = await res.json();
-    return res.ok ? data.email : `(kon account niet ophalen: ${data.error_summary || res.status})`;
+    if (!res.ok) return { email: `(kon account niet ophalen: ${data.error_summary || res.status})`, rootInfo: null };
+    return { email: data.email, rootInfo: data.root_info || null };
   } catch (err) {
-    return `(kon account niet ophalen: ${err.message})`;
+    return { email: `(kon account niet ophalen: ${err.message})`, rootInfo: null };
   }
+}
+
+async function listFolderWithRoot(accessToken, path, pathRootNamespaceId) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  if (pathRootNamespaceId) {
+    headers["Dropbox-API-Path-Root"] = JSON.stringify({ ".tag": "namespace_id", namespace_id: pathRootNamespaceId });
+  }
+  const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ path, recursive: false }),
+  });
+  const data = await res.json();
+  return { ok: res.ok, data };
 }
 
 async function listSourceFiles(accessToken) {
-  const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ path: SOURCE_FOLDER, recursive: false }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    if (data?.error_summary && data.error_summary.includes("not_found")) {
-      // Niet stilzwijgend als "leeg" behandelen — dit kan ook een verkeerd
-      // gekoppeld account of een nog niet aangemaakte map zijn. Diagnose
-      // erbij: welk account is gekoppeld, en wat ziet de API wél op
-      // app-root-niveau (path "")?
-      const [email, rootRes] = await Promise.all([
-        getCurrentAccountEmail(accessToken),
-        fetch("https://api.dropboxapi.com/2/files/list_folder", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ path: "", recursive: false }),
-        }),
-      ]);
-      const rootData = await rootRes.json();
-      const rootNames = rootRes.ok
-        ? (rootData.entries || []).map((e) => e.name)
-        : [`(kon root niet lezen: ${rootData.error_summary || rootRes.status})`];
-      throw new Error(
-        `Map "${SOURCE_FOLDER}" niet gevonden via de Dropbox-API. ` +
-        `Gekoppeld account: ${email}. ` +
-        `Wat de API op app-root-niveau ziet: ${rootNames.length ? rootNames.join(", ") : "(leeg)"}.`
-      );
-    }
-    throw new Error(`Dropbox list_folder mislukt: ${data.error_summary || res.status}`);
+  const primary = await listFolderWithRoot(accessToken, SOURCE_FOLDER);
+  if (primary.ok) {
+    const rawFiles = (primary.data.entries || []).filter((e) => e[".tag"] === "file");
+    const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
+    return { files: filtered, allNames: rawFiles.map((e) => e.name), usedNamespace: null };
   }
-  const rawFiles = (data.entries || []).filter((e) => e[".tag"] === "file");
-  const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
-  return { files: filtered, allNames: rawFiles.map((e) => e.name) };
+
+  if (!primary.data?.error_summary || !primary.data.error_summary.includes("not_found")) {
+    throw new Error(`Dropbox list_folder mislukt: ${primary.data.error_summary || "onbekende fout"}`);
+  }
+
+  // Niet gevonden op de standaard root — mogelijk een Team-Space/namespace-
+  // verschil (Dropbox Business). Probeer het opnieuw met de home-namespace
+  // van de gebruiker expliciet ingesteld via Dropbox-API-Path-Root.
+  const { email, rootInfo } = await getAccountDiagnostics(accessToken);
+  const homeNamespaceId = rootInfo?.home_namespace_id;
+  const rootNamespaceId = rootInfo?.root_namespace_id;
+
+  if (homeNamespaceId && homeNamespaceId !== rootNamespaceId) {
+    const retry = await listFolderWithRoot(accessToken, SOURCE_FOLDER, homeNamespaceId);
+    if (retry.ok) {
+      const rawFiles = (retry.data.entries || []).filter((e) => e[".tag"] === "file");
+      const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
+      return { files: filtered, allNames: rawFiles.map((e) => e.name), usedNamespace: homeNamespaceId };
+    }
+  }
+
+  // Ook met home-namespace niet gevonden (of geen team-namespace-verschil) —
+  // rapporteer alle diagnose-info zodat het pad/account/namespace-probleem
+  // zichtbaar wordt zonder verdere gok-rondes.
+  const rootRes = await listFolderWithRoot(accessToken, "");
+  const rootNames = rootRes.ok
+    ? (rootRes.data.entries || []).map((e) => e.name)
+    : [`(kon root niet lezen: ${rootRes.data.error_summary || "onbekende fout"})`];
+  throw new Error(
+    `Map "${SOURCE_FOLDER}" niet gevonden via de Dropbox-API. ` +
+    `Gekoppeld account: ${email}. ` +
+    `root_namespace_id: ${rootNamespaceId || "?"}, home_namespace_id: ${homeNamespaceId || "?"}. ` +
+    `Wat de API op app-root-niveau ziet (standaard namespace): ${rootNames.length ? rootNames.join(", ") : "(leeg)"}.`
+  );
 }
 
-async function downloadFile(accessToken, path) {
+async function downloadFile(accessToken, path, pathRootNamespaceId) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Dropbox-API-Arg": JSON.stringify({ path }),
+  };
+  if (pathRootNamespaceId) {
+    headers["Dropbox-API-Path-Root"] = JSON.stringify({ ".tag": "namespace_id", namespace_id: pathRootNamespaceId });
+  }
   const res = await fetch("https://content.dropboxapi.com/2/files/download", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Dropbox-API-Arg": JSON.stringify({ path }),
-    },
+    headers,
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -219,12 +243,18 @@ async function handleMove(req, res) {
   const accessToken = await getAccessToken();
   const filename = body.path.split("/").pop();
   const destPath = `${PROCESSED_FOLDER}/${filename}`;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+  // Zelfde namespace als bij het ophalen gebruikt (Dropbox Business/Team-
+  // Space-namespace-verschil), zodat move_v2 hetzelfde pad terugvindt.
+  if (body.namespace) {
+    headers["Dropbox-API-Path-Root"] = JSON.stringify({ ".tag": "namespace_id", namespace_id: body.namespace });
+  }
   const moveRes = await fetch("https://api.dropboxapi.com/2/files/move_v2", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({ from_path: body.path, to_path: destPath, autorename: true }),
   });
   const moveData = await moveRes.json();
@@ -237,7 +267,7 @@ async function handleMove(req, res) {
 
 async function handleList(req, res) {
   const accessToken = await getAccessToken();
-  const { files, allNames } = await listSourceFiles(accessToken);
+  const { files, allNames, usedNamespace } = await listSourceFiles(accessToken);
 
   if (files.length === 0) {
     res.status(200).json({
@@ -256,7 +286,7 @@ async function handleList(req, res) {
   for (const file of files) {
     const dropboxPath = file.path_display || file.path_lower;
     try {
-      const buffer = await downloadFile(accessToken, file.path_lower);
+      const buffer = await downloadFile(accessToken, file.path_lower, usedNamespace);
       let parsed;
       if (/\.xml$/i.test(file.name)) {
         parsed = parseUbl(buffer.toString("utf8"));
@@ -268,11 +298,12 @@ async function handleList(req, res) {
         await parser.destroy();
         parsed = parsePdfText(result.text || "");
       }
-      drafts.push({ ...parsed, fileName: file.name, dropboxPath });
+      drafts.push({ ...parsed, fileName: file.name, dropboxPath, dropboxNamespace: usedNamespace || null });
     } catch (err) {
       drafts.push({
         fileName: file.name,
         dropboxPath,
+        dropboxNamespace: usedNamespace || null,
         source: /\.xml$/i.test(file.name) ? "UBL" : "PDF",
         description: file.name,
         counterparty: "",
