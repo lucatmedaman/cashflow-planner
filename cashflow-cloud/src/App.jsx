@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.16.0";
+const APP_VERSION = "2.16.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2333,7 +2333,11 @@ export default function CashflowPlanner() {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const drafts = data.drafts || [];
       if (drafts.length === 0) {
-        setImportNotice("Geen nieuwe bestanden gevonden in de Dropbox-map \"Cashflow-facturen-inlezen\".");
+        const debugNames = data.debugAllFilesInFolder;
+        const extra = debugNames && debugNames.length
+          ? ` (bestanden die de API wél ziet in de map, maar geen .xml/.pdf: ${debugNames.join(", ")})`
+          : "";
+        setImportNotice(`Geen nieuwe bestanden gevonden in de Dropbox-map "Cashflow-facturen-inlezen".${extra}`);
         return;
       }
       setDropboxQueueTotal(drafts.length);
