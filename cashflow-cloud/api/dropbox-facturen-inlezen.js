@@ -99,39 +99,14 @@ async function listSourceFiles(accessToken) {
 
   const primaryErrorSummary = primary.data?.error_summary;
   if (!primaryErrorSummary || !primaryErrorSummary.includes("not_found")) {
-    // Geen herkenbare "not_found" JSON-fout -> waarschijnlijk de platte-
-    // tekst-variant (argumentfout) of iets anders onverwachts. Toon de
-    // ruwe Dropbox-respons rechtstreeks, geen verdere gok-rondes.
     throw new Error(`Dropbox list_folder mislukt: ${primaryErrorSummary || primary.raw || "onbekende fout"}`);
   }
 
-  // Niet gevonden op de standaard root — mogelijk een Team-Space/namespace-
-  // verschil (Dropbox Business). Probeer het opnieuw met de home-namespace
-  // van de gebruiker expliciet ingesteld via Dropbox-API-Path-Root.
-  const { email, rootInfo } = await getAccountDiagnostics(accessToken);
-  const homeNamespaceId = rootInfo?.home_namespace_id;
-  const rootNamespaceId = rootInfo?.root_namespace_id;
-
-  if (homeNamespaceId && homeNamespaceId !== rootNamespaceId) {
-    const retry = await listFolderWithRoot(accessToken, SOURCE_FOLDER, homeNamespaceId);
-    if (retry.ok) {
-      const rawFiles = (retry.data.entries || []).filter((e) => e[".tag"] === "file");
-      const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
-      return { files: filtered, allNames: rawFiles.map((e) => e.name), usedNamespace: homeNamespaceId };
-    }
-    // Ook de namespace-poging gaf geen normale JSON-not_found-fout -> toon
-    // die ruwe fout meteen, samen met de rest van de diagnose hieronder.
-    if (!retry.data?.error_summary?.includes("not_found")) {
-      throw new Error(
-        `Dropbox list_folder (met home-namespace) mislukt: ${retry.data?.error_summary || retry.raw || "onbekende fout"}. ` +
-        `Gekoppeld account: ${email}.`
-      );
-    }
-  }
-
-  // Ook met home-namespace niet gevonden (of geen team-namespace-verschil) —
-  // rapporteer alle diagnose-info zodat het pad/account/namespace-probleem
-  // zichtbaar wordt zonder verdere gok-rondes.
+  // Niet gevonden. Dropbox-API-Path-Root (Team-Space-namespace-override)
+  // wordt NIET ondersteund voor App-folder-scope ("sandbox") apps — dus
+  // geen namespace-fallback proberen, enkel diagnose-info verzamelen: het
+  // account en wat er wél zichtbaar is op app-root-niveau ("").
+  const { email } = await getAccountDiagnostics(accessToken);
   const rootRes = await listFolderWithRoot(accessToken, "");
   const rootNames = rootRes.ok
     ? (rootRes.data.entries || []).map((e) => e.name)
@@ -139,8 +114,8 @@ async function listSourceFiles(accessToken) {
   throw new Error(
     `Map "${SOURCE_FOLDER}" niet gevonden via de Dropbox-API. ` +
     `Gekoppeld account: ${email}. ` +
-    `root_namespace_id: ${rootNamespaceId || "?"}, home_namespace_id: ${homeNamespaceId || "?"}. ` +
-    `Wat de API op app-root-niveau ziet (standaard namespace): ${rootNames.length ? rootNames.join(", ") : "(leeg)"}.`
+    `Wat de API op app-root-niveau ziet: ${rootNames.length ? rootNames.join(", ") : "(leeg)"}. ` +
+    `Meest waarschijnlijk: het bestand is nog niet volledig gesynchroniseerd naar de Dropbox-servers — controleer op dropbox.com (web) of het bestand daar al zichtbaar is.`
   );
 }
 
