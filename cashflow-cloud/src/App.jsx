@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.15.0";
+const APP_VERSION = "2.16.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -840,6 +840,9 @@ export default function CashflowPlanner() {
   const [ublSaving, setUblSaving] = useState(false);
   const [ublError, setUblError] = useState("");
   const [ublFollowUp, setUblFollowUp] = useState(null); // {pdfFile, filename, entity}
+  const [dropboxQueue, setDropboxQueue] = useState([]); // resterende drafts, wachtrij na "Dropbox-facturen inlezen"
+  const [dropboxQueueTotal, setDropboxQueueTotal] = useState(0);
+  const [dropboxLoading, setDropboxLoading] = useState(false);
   const [recurringDraft, setRecurringDraft] = useState(null); // {payment, entityId, counterparty, counterpartyId, description, amount, dueDate, recurrence, endDate}
   const [recurringSaving, setRecurringSaving] = useState(false);
   const [importNotice, setImportNotice] = useState("");
@@ -2315,6 +2318,69 @@ export default function CashflowPlanner() {
     reader.readAsArrayBuffer(file);
   }
 
+  // Dropbox-facturen inlezen: haalt alle nieuwe bestanden op uit
+  // /Cashflow-facturen-inlezen (via /api/dropbox-facturen-inlezen, GET),
+  // die al geparsed terugkomen (UBL-regex resp. pdf-parse, server-side).
+  // Ze worden ÉÉN VOOR ÉÉN door het bestaande review-scherm (ublDraft)
+  // geloodst — pas na "Post aanmaken" wordt het bijbehorende Dropbox-
+  // bestand naar de submap "Verwerkt" verplaatst (zie submitUblImport).
+  async function loadDropboxQueue() {
+    setDropboxLoading(true);
+    setAirtableError("");
+    try {
+      const res = await fetch("/api/dropbox-facturen-inlezen");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const drafts = data.drafts || [];
+      if (drafts.length === 0) {
+        setImportNotice("Geen nieuwe bestanden gevonden in de Dropbox-map \"Cashflow-facturen-inlezen\".");
+        return;
+      }
+      setDropboxQueueTotal(drafts.length);
+      openNextDropboxDraft(drafts);
+    } catch (err) {
+      setAirtableError(`Dropbox-facturen ophalen mislukt: ${err.message}`);
+    } finally {
+      setDropboxLoading(false);
+    }
+  }
+  // Neemt het volgende item uit de gegeven (of huidige) wachtrij en zet het
+  // klaar in het bestaande ublDraft-reviewscherm.
+  function openNextDropboxDraft(explicitQueue) {
+    const queue = explicitQueue ?? dropboxQueue;
+    if (!queue || queue.length === 0) {
+      setDropboxQueue([]);
+      setDropboxQueueTotal(0);
+      setImportNotice("Alle Dropbox-facturen uit de wachtrij verwerkt.");
+      return;
+    }
+    const [next, ...rest] = queue;
+    setDropboxQueue(rest);
+    setUblDraft({
+      entityId: activeEntity !== "all" ? activeEntity : "",
+      ...next, // bevat al: source, description, counterparty, amount, dueDate, invoiceDate, accountNumber, fileName, parseWarning, dropboxPath
+    });
+    setUblError("");
+  }
+  // Verplaatst het Dropbox-bestand van deze draft naar de submap Verwerkt.
+  // Wordt aangeroepen NA succesvol aanmaken/bijwerken van de post — nooit
+  // ervoor, zodat een mislukte post-creatie het bestand niet "kwijt" maakt.
+  async function moveDropboxFileToVerwerkt(dropboxPath) {
+    if (!dropboxPath) return;
+    try {
+      const res = await fetch("/api/dropbox-facturen-inlezen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "move", path: dropboxPath }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    } catch (err) {
+      // Post staat al in Airtable — dit alleen melden, niet blokkeren.
+      setAirtableError(`Post aangemaakt, maar bestand verplaatsen naar "Verwerkt" mislukt: ${err.message}. Verplaats het bestand best zelf in Dropbox om dubbele verwerking te vermijden.`);
+    }
+  }
+
   // Vindt een bestaande HERHALENDE post (Herhaling ≠ once) van dezelfde
   // crediteur/boekhouding/richting met een nog-onbetaalde occurrence dicht
   // bij de vervaldatum van een binnenkomende factuur. Gebruikt door zowel
@@ -2419,7 +2485,14 @@ export default function CashflowPlanner() {
         const filename = `${sanitize(ublDraft.counterparty) || "Factuur"} - ${ublDraft.dueDate} - ${ublDraft.amount}.pdf`;
         setUblFollowUp({ pdfFile: ublDraft.pdfFile, filename, entity });
       }
+      // Dropbox-wachtrij: bestand pas nu (na succesvolle post) verplaatsen
+      // naar Verwerkt, en meteen het volgende item in de wachtrij openen.
+      const finishedDropboxPath = ublDraft.dropboxPath;
       setUblDraft(null);
+      if (finishedDropboxPath) {
+        moveDropboxFileToVerwerkt(finishedDropboxPath);
+        openNextDropboxDraft();
+      }
     } catch (err) {
       setAirtableError(err.message);
       setUblError(`Opslaan mislukt: ${err.message}`);
@@ -3228,6 +3301,15 @@ export default function CashflowPlanner() {
                       <span className="block text-[10px] text-slate-400">laatst: {formatActionTimestamp(lastRunByAction["PDF-inlezen"])}</span>
                     )}
                   </span>
+                </button>
+                <button
+                  onClick={() => { loadDropboxQueue(); setShowActionsMenu(false); }}
+                  disabled={dropboxLoading}
+                  title="Nieuwe bestanden uit de Dropbox-map 'Cashflow-facturen-inlezen' één voor één inlezen en controleren"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {dropboxLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 mt-0.5 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
+                  <span className="flex-1 text-left">Dropbox-facturen inlezen</span>
                 </button>
                 <button
                   onClick={() => { triggerPocketsmithSync(); setShowActionsMenu(false); }}
@@ -4113,8 +4195,15 @@ export default function CashflowPlanner() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-md w-full p-4 space-y-2.5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-slate-800">{ublDraft.source === "PDF" ? "PDF-factuur inlezen" : "UBL-factuur inlezen"}</p>
-              <button onClick={() => setUblDraft(null)}><X className="w-4 h-4 text-slate-400" /></button>
+              <p className="text-sm font-medium text-slate-800">
+                {ublDraft.source === "PDF" ? "PDF-factuur inlezen" : "UBL-factuur inlezen"}
+                {ublDraft.dropboxPath && (
+                  <span className="ml-1.5 text-[11px] font-normal text-slate-400">
+                    (Dropbox-wachtrij — nog {dropboxQueue.length} na deze)
+                  </span>
+                )}
+              </p>
+              <button onClick={() => { setUblDraft(null); setUblError(""); if (ublDraft.dropboxPath) openNextDropboxDraft(); }}><X className="w-4 h-4 text-slate-400" /></button>
             </div>
             <p className="text-[11px] text-slate-400 truncate">{ublDraft.fileName}</p>
             {ublDraft.parseWarning && (
@@ -4200,8 +4289,11 @@ export default function CashflowPlanner() {
               >
                 {ublSaving ? "Bezig…" : "Post aanmaken"}
               </button>
-              <button onClick={() => { setUblDraft(null); setUblError(""); }} className="px-4 rounded-lg border border-slate-200 text-sm">
-                Annuleer
+              <button
+                onClick={() => { setUblDraft(null); setUblError(""); if (ublDraft.dropboxPath) openNextDropboxDraft(); }}
+                className="px-4 rounded-lg border border-slate-200 text-sm"
+              >
+                {ublDraft.dropboxPath ? "Overslaan" : "Annuleer"}
               </button>
             </div>
           </div>
