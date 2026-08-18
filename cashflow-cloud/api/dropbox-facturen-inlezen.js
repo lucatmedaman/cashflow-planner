@@ -266,6 +266,20 @@ async function handleMove(req, res) {
   res.status(200).json({ status: "ok", movedTo: moveData?.metadata?.path_display || destPath });
 }
 
+async function handlePreview(req, res) {
+  const path = req.query?.preview;
+  if (!path) {
+    res.status(400).json({ error: "Query-param 'preview' (Dropbox-pad) ontbreekt." });
+    return;
+  }
+  const accessToken = await getAccessToken();
+  const namespace = req.query?.namespace || undefined;
+  const buffer = await downloadFile(accessToken, path, namespace);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.status(200).send(buffer);
+}
+
 async function handleDiagnose(req, res) {
   const accessToken = await getAccessToken();
   const { email } = await getAccountDiagnostics(accessToken);
@@ -362,6 +376,10 @@ export default async function handler(req, res) {
     }
     if (req.query?.diagnose) {
       await handleDiagnose(req, res);
+      return;
+    }
+    if (req.query?.preview) {
+      await handlePreview(req, res);
       return;
     }
     await handleList(req, res);
