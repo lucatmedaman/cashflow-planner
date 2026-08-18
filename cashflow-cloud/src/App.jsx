@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.19.2";
+const APP_VERSION = "2.20.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -1502,6 +1502,61 @@ export default function CashflowPlanner() {
 
       await atDelete(TABLES.items, [duplicateItem.id]);
       setItems((prev) => prev.filter((i) => i.id !== duplicateItem.id));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
+  // Analoog aan mergeDuplicateItem, maar dan voor twee Betaling-records die
+  // dezelfde bank-transactie blijken te zijn (bv. dubbel geïmporteerd).
+  // Verhuist de document-koppelingen (en een eventuele GekoppeldeOccurrence-
+  // pin) van de duplicate naar de doelbetaling, en verwijdert daarna de
+  // duplicate. Net als bij mergeDuplicateItem: enkel bedoeld voor echte
+  // duplicaten, niet voor twee afzonderlijke, toevallig gelijkaardige
+  // transacties — dat onderscheid maakt de gebruiker zelf bij het kiezen.
+  async function mergePayments(duplicatePayment, targetPaymentId) {
+    try {
+      const targetPayment = payments.find((p) => p.id === targetPaymentId);
+      if (!targetPayment) {
+        setAirtableError("Doelbetaling niet gevonden.");
+        return;
+      }
+
+      const duplicateDocIds = duplicatePayment.documentIds || [];
+      if (duplicateDocIds.length > 0) {
+        const newTargetDocIds = Array.from(new Set([...(targetPayment.documentIds || []), ...duplicateDocIds]));
+        const targetFields = { GekoppeldeDocumenten: newTargetDocIds };
+        // Pin overnemen als de doelbetaling er zelf nog geen heeft.
+        if (!targetPayment.pinnedOccurrence && duplicatePayment.pinnedOccurrence) {
+          targetFields.GekoppeldeOccurrence = duplicatePayment.pinnedOccurrence;
+        }
+        await atUpdate(TABLES.payments, [{ id: targetPayment.id, fields: targetFields }]);
+        setPayments((prev) =>
+          prev.map((p) =>
+            p.id === targetPayment.id
+              ? { ...p, documentIds: newTargetDocIds, pinnedOccurrence: targetFields.GekoppeldeOccurrence || p.pinnedOccurrence }
+              : p
+          )
+        );
+
+        // Elk gekoppeld document verwees naar de duplicate-betaling; dat
+        // moet nu naar de doelbetaling wijzen (mag geen dubbele of hangende
+        // verwijzingen achterlaten).
+        const affectedItems = items.filter((i) => duplicateDocIds.includes(i.id));
+        if (affectedItems.length > 0) {
+          const itemUpdates = affectedItems.map((i) => {
+            const newPaymentIds = Array.from(new Set([...(i.paymentIds || []).filter((pid) => pid !== duplicatePayment.id), targetPayment.id]));
+            return { id: i.id, fields: { Betalingen: newPaymentIds } };
+          });
+          await atUpdate(TABLES.items, itemUpdates);
+          const newIdsByItem = Object.fromEntries(itemUpdates.map((u) => [u.id, u.fields.Betalingen]));
+          setItems((prev) => prev.map((i) => (newIdsByItem[i.id] ? { ...i, paymentIds: newIdsByItem[i.id] } : i)));
+        }
+      }
+
+      await atDelete(TABLES.payments, [duplicatePayment.id]);
+      setPayments((prev) => prev.filter((p) => p.id !== duplicatePayment.id));
       markSynced();
     } catch (err) {
       setAirtableError(err.message);
@@ -3854,6 +3909,7 @@ export default function CashflowPlanner() {
             onCounterpartyClick={goToCounterparty}
             onResolveCounterparty={resolveCounterpartyId}
             onBulkAssignCounterparty={bulkAssignCounterparty}
+            onMergePayments={mergePayments}
             directionFilter={directionFilter}
             setDirectionFilter={setDirectionFilter}
             onOpenRecurringDraft={(payment) =>
@@ -8085,7 +8141,47 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
 // betalingen met "geen document nodig", die in het Koppelen-scherm nergens
 // verschijnen omdat ze buiten zowel de ongekoppelde- als gekoppelde-secties
 // vallen.
-function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty, directionFilter, setDirectionFilter }) {
+// Zelfde doorzoekbare-picker-patroon als MergeTargetPicker (crediteuren),
+// maar dan voor het kiezen van een doel-Betaling bij "mergen naar…".
+function PaymentMergeTargetPicker({ payments, excludeId, entityById, value, onChange }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = payments.find((p) => p.id === value);
+  const label = (p) => `${p.date} · ${p.description} · ${eur(p.amount)}`;
+  const results = query.trim()
+    ? payments
+        .filter((p) => p.id !== excludeId && (p.description + " " + p.date).toLowerCase().includes(query.trim().toLowerCase()))
+        .slice(0, 8)
+    : [];
+  return (
+    <div className="relative">
+      <input
+        value={open ? query : selected ? label(selected) : query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); onChange(""); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Zoek doel-betaling (datum of omschrijving)…"
+        className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400 bg-white"
+      />
+      {open && results.length > 0 && (
+        <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-sm max-h-48 overflow-y-auto">
+          {results.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={() => { onChange(p.id); setQuery(""); setOpen(false); }}
+              className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-slate-50"
+            >
+              {label(p)} <span className="text-slate-400">· {entityById[p.entityId]?.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty, onMergePayments, directionFilter, setDirectionFilter }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCounterparty, setBulkCounterparty] = useState("");
@@ -8097,6 +8193,10 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   const [paySortField, setPaySortField] = useState("date"); // date | amount | description | volgnummer
   const [paySortDir, setPaySortDir] = useState("desc"); // asc | desc
   const [searchQuery, setSearchQuery] = useState("");
+  const [mergingFor, setMergingFor] = useState(null); // payment.id waarvoor de merge-picker openstaat
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState("");
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -8367,6 +8467,12 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                       herhalende post
                     </button>
                     <button
+                      onClick={(e) => { e.stopPropagation(); setMergingFor(mergingFor === p.id ? null : p.id); setMergeTargetId(""); setMergeError(""); }}
+                      className="text-[10px] text-slate-400 underline decoration-dotted"
+                    >
+                      {mergingFor === p.id ? "sluiten" : "mergen naar…"}
+                    </button>
+                    <button
                       onClick={(e) => { e.stopPropagation(); onDeletePayment(p); }}
                       className="text-[10px] text-rose-400 underline decoration-dotted"
                     >
@@ -8377,6 +8483,46 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                     </span>
                   </div>
                 </div>
+                {mergingFor === p.id && (
+                  <div onClick={(e) => e.stopPropagation()} className="mt-2 ml-[26px] p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                    <p className="text-[11px] text-slate-500">
+                      Verhuist gekoppelde documenten (en een evt. vaste occurrence-pin) van deze betaling naar de gekozen doel-betaling, en verwijdert daarna deze betaling. Enkel bedoelen voor échte duplicaten (bv. dubbel geïmporteerd).
+                    </p>
+                    <PaymentMergeTargetPicker
+                      payments={payments}
+                      excludeId={p.id}
+                      entityById={entityById}
+                      value={mergeTargetId}
+                      onChange={setMergeTargetId}
+                    />
+                    {mergeError && <p className="text-[11px] text-rose-600">{mergeError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          if (!mergeTargetId) return;
+                          setMerging(true);
+                          setMergeError("");
+                          try {
+                            await onMergePayments(p, mergeTargetId);
+                            setMergingFor(null);
+                            setMergeTargetId("");
+                          } catch (err) {
+                            setMergeError(err.message);
+                          } finally {
+                            setMerging(false);
+                          }
+                        }}
+                        disabled={!mergeTargetId || merging}
+                        className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 disabled:opacity-40"
+                      >
+                        {merging ? "Bezig…" : "Bevestig merge"}
+                      </button>
+                      <button onClick={() => { setMergingFor(null); setMergeError(""); }} className="text-xs text-slate-400">
+                        Annuleer
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
