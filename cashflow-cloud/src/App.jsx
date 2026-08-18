@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.17.2";
+const APP_VERSION = "2.17.3";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
