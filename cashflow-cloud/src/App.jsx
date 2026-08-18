@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.14.0";
+const APP_VERSION = "2.15.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -801,6 +801,7 @@ export default function CashflowPlanner() {
     setView("debiteuren");
   }
   const [windowDays, setWindowDays] = useState(60);
+  const [showAllPlanned, setShowAllPlanned] = useState(false); // negeert windowDays, toont alles tot 10 jaar vooruit
   const [directionFilter, setDirectionFilter] = useState("all"); // all | in | uit — Planning én Betalingen
   // Verbergt openstaande posten die pas heel recent vervallen zijn (bv. je
   // hebt net betaald, maar de bank moet het uittreksel nog posten/inlezen)
@@ -1988,7 +1989,7 @@ export default function CashflowPlanner() {
   // until it's marked paid, no matter how old. Only the forward window (windowDays)
   // is user-adjustable; the backward lookback is fixed to avoid ever hiding a debt.
   const rangeStart = toISO(addDays(new Date(), -3650));
-  const rangeEnd = toISO(addDays(new Date(), windowDays));
+  const rangeEnd = toISO(addDays(new Date(), showAllPlanned ? 3650 : windowDays));
 
   const occurrenceRows = useMemo(() => {
     const rows = [];
@@ -3400,14 +3401,24 @@ export default function CashflowPlanner() {
                 {[30, 60, 90, 180, 365].map((d) => (
                   <button
                     key={d}
-                    onClick={() => setWindowDays(d)}
-                    className={`px-2.5 py-1 rounded-md border text-xs ${
-                      windowDays === d ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"
+                    onClick={() => { setWindowDays(d); setShowAllPlanned(false); }}
+                    disabled={showAllPlanned}
+                    className={`px-2.5 py-1 rounded-md border text-xs disabled:opacity-40 ${
+                      windowDays === d && !showAllPlanned ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"
                     }`}
                   >
                     {d === 180 ? "6m" : d === 365 ? "1j" : `${d}d`}
                   </button>
                 ))}
+                <button
+                  onClick={() => setShowAllPlanned((v) => !v)}
+                  className={`px-2.5 py-1 rounded-md border text-xs ${
+                    showAllPlanned ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200"
+                  }`}
+                  title="Negeert de periode hierboven en toont alle geplande, nog onbetaalde posten tot 10 jaar vooruit"
+                >
+                  alles
+                </button>
               </div>
             </div>
 
