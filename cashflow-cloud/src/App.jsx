@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.16.3";
+const APP_VERSION = "2.17.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -843,6 +843,27 @@ export default function CashflowPlanner() {
   const [dropboxQueue, setDropboxQueue] = useState([]); // resterende drafts, wachtrij na "Dropbox-facturen inlezen"
   const [dropboxQueueTotal, setDropboxQueueTotal] = useState(0);
   const [dropboxLoading, setDropboxLoading] = useState(false);
+  const [ublPreviewUrl, setUblPreviewUrl] = useState(null); // PDF-voorbeeld naast het reviewscherm
+
+  // PDF-voorbeeld tonen naast het reviewscherm: bij handmatige upload direct
+  // via een blob-URL van het File-object (geen server nodig); bij een
+  // Dropbox-item via de server-proxy (/api/dropbox-facturen-inlezen?preview=…),
+  // want daar hebben we enkel het Dropbox-pad, geen lokaal bestand.
+  useEffect(() => {
+    if (!ublDraft || ublDraft.source !== "PDF") { setUblPreviewUrl(null); return; }
+    if (ublDraft.pdfFile) {
+      const objectUrl = URL.createObjectURL(ublDraft.pdfFile);
+      setUblPreviewUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+    if (ublDraft.dropboxPath) {
+      const params = new URLSearchParams({ preview: ublDraft.dropboxPath });
+      if (ublDraft.dropboxNamespace) params.set("namespace", ublDraft.dropboxNamespace);
+      setUblPreviewUrl(`/api/dropbox-facturen-inlezen?${params.toString()}`);
+      return;
+    }
+    setUblPreviewUrl(null);
+  }, [ublDraft?.pdfFile, ublDraft?.dropboxPath, ublDraft?.source]);
   const [recurringDraft, setRecurringDraft] = useState(null); // {payment, entityId, counterparty, counterpartyId, description, amount, dueDate, recurrence, endDate}
   const [recurringSaving, setRecurringSaving] = useState(false);
   const [importNotice, setImportNotice] = useState("");
@@ -4198,7 +4219,13 @@ export default function CashflowPlanner() {
       {/* UBL-inleesmodal: preview/bewerken vóór opslaan */}
       {ublDraft && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-md w-full p-4 space-y-2.5 max-h-[90vh] overflow-y-auto">
+          <div className={`bg-white rounded-xl w-full p-4 max-h-[90vh] flex flex-col sm:flex-row gap-4 overflow-hidden ${ublPreviewUrl ? "max-w-4xl" : "max-w-md"}`}>
+            {ublPreviewUrl && (
+              <div className="sm:w-1/2 h-64 sm:h-auto shrink-0 rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+                <iframe src={ublPreviewUrl} title="Factuur-voorbeeld" className="w-full h-full" />
+              </div>
+            )}
+            <div className={`space-y-2.5 overflow-y-auto ${ublPreviewUrl ? "sm:w-1/2" : "w-full"}`}>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-slate-800">
                 {ublDraft.source === "PDF" ? "PDF-factuur inlezen" : "UBL-factuur inlezen"}
@@ -4300,6 +4327,7 @@ export default function CashflowPlanner() {
               >
                 {ublDraft.dropboxPath ? "Overslaan" : "Annuleer"}
               </button>
+            </div>
             </div>
           </div>
         </div>
