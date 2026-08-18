@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.18.0";
+const APP_VERSION = "2.19.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -814,6 +814,7 @@ export default function CashflowPlanner() {
   const [showPaidHistory, setShowPaidHistory] = useState(false);
   const [showHiddenList, setShowHiddenList] = useState(false);
   const [showOverdue, setShowOverdue] = useState(false);
+  const [expandedDates, setExpandedDates] = useState(() => new Set()); // datums die uitgeklapt zijn in Planning — default alles ingeklapt
 
   const emptyForm = {
     entityId: "",
@@ -2063,6 +2064,20 @@ export default function CashflowPlanner() {
     });
     return Object.entries(groups).sort(([a], [b]) => (a < b ? -1 : 1));
   }, [upcomingRows]);
+
+  function toggleDateExpanded(date) {
+    setExpandedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date); else next.add(date);
+      return next;
+    });
+  }
+  function expandAllDates() {
+    setExpandedDates(new Set(groupedByDate.map(([date]) => date)));
+  }
+  function collapseAllDates() {
+    setExpandedDates(new Set());
+  }
 
   // ---- summary numbers (within window, unpaid + today..end only, excludes overdue-before-today for "upcoming" totals) ----
   const windowFutureRows = upcomingRows.filter((r) => r.displayDate >= todayISO());
@@ -3636,17 +3651,32 @@ export default function CashflowPlanner() {
               {groupedByDate.length === 0 && (
                 <p className="text-sm text-slate-400 text-center py-10">Niets gepland in deze periode.</p>
               )}
+              {groupedByDate.length > 0 && (
+                <div className="flex justify-end gap-3 text-[11px] text-slate-400 -mb-2">
+                  <button onClick={expandAllDates} className="hover:text-slate-600">Alles uitklappen</button>
+                  <span className="text-slate-200">·</span>
+                  <button onClick={collapseAllDates} className="hover:text-slate-600">Alles inklappen</button>
+                </div>
+              )}
               {groupedByDate.map(([date, rows]) => {
                 const dateIn = rows.filter((r) => r.item.direction === "in").reduce((s, r) => s + Number(r.item.amount), 0);
                 const dateUit = rows.filter((r) => r.item.direction === "uit").reduce((s, r) => s + Number(r.item.amount), 0);
                 const dateNet = dateIn - dateUit;
+                const isExpanded = expandedDates.has(date);
                 return (
                 <div key={date}>
-                  <div className="flex items-baseline justify-between mb-1.5">
-                    <p className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
-                      {formatDateLabel(date)}
-                    </p>
-                    <p className="font-num text-xs font-medium shrink-0">
+                  <button
+                    onClick={() => toggleDateExpanded(date)}
+                    className="w-full flex items-baseline justify-between mb-1.5 text-left"
+                  >
+                    <span className="flex items-center gap-1">
+                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                      <span className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
+                        {formatDateLabel(date)}
+                      </span>
+                      <span className="text-[11px] text-slate-300 font-sans not-italic">({rows.length})</span>
+                    </span>
+                    <span className="font-num text-xs font-medium shrink-0">
                       {dateIn > 0 && dateUit > 0 && (
                         <span className="text-[#93999F] font-normal mr-1.5">
                           +{eur(dateIn)} / −{eur(dateUit)}
@@ -3655,8 +3685,9 @@ export default function CashflowPlanner() {
                       <span className={dateNet >= 0 ? "text-[#1E8E5A]" : "text-[#B3462C]"}>
                         {dateNet >= 0 ? "+" : ""}{eur(dateNet)}
                       </span>
-                    </p>
-                  </div>
+                    </span>
+                  </button>
+                  {isExpanded && (
                   <div className="space-y-1.5">
                     {rows.map((r) => (
                       <React.Fragment key={`${r.itemId}-${r.date}`}>
@@ -3680,6 +3711,7 @@ export default function CashflowPlanner() {
                       </React.Fragment>
                     ))}
                   </div>
+                  )}
                 </div>
                 );
               })}
