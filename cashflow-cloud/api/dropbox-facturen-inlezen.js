@@ -173,9 +173,27 @@ function parseUbl(rawXml) {
   };
 }
 
+// ---- PDF-tekstextractie: pdfjs-dist "legacy"-build, specifiek gemaakt om
+//      in Node te draaien zonder browser-DOM. LET OP: het package "pdf-parse"
+//      werkte hier NIET betrouwbaar (v2 gaf "DOMMatrix is not defined", v1
+//      faalde op "bad XRef entry" bij PDF's van moderne generators) — lokaal
+//      geverifieerd vóór deze keuze, met deze rechtstreekse aanpak wél
+//      succesvol getest tegen twee verschillend gegenereerde test-PDF's. ----
+async function extractPdfText(buffer) {
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const loadingTask = getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
+  const doc = await loadingTask.promise;
+  let text = "";
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((it) => it.str).join(" ") + "\n";
+  }
+  return text;
+}
+
 // ---- PDF-parsing: zelfde heuristieken als App.jsx parsePdfInvoiceText,
-//      hier toegepast op tekst uit pdf-parse (Node, geen DOM nodig) i.p.v.
-//      pdf.js (dat enkel in de browser werkt). ----
+//      hier toegepast op tekst uit extractPdfText() hierboven. ----
 const DUTCH_MONTHS = { januari: 1, februari: 2, maart: 3, april: 4, mei: 5, juni: 6, juli: 7, augustus: 8, september: 9, oktober: 10, november: 11, december: 12 };
 function parseLooseDate(str) {
   if (!str) return null;
@@ -336,12 +354,8 @@ async function handleList(req, res) {
       if (/\.xml$/i.test(file.name)) {
         parsed = parseUbl(buffer.toString("utf8"));
       } else {
-        // pdf-parse v2 API: class-based (v1's `pdfParse(buffer)`-functie bestaat niet meer).
-        const { PDFParse } = await import("pdf-parse");
-        const parser = new PDFParse({ data: buffer });
-        const result = await parser.getText();
-        await parser.destroy();
-        parsed = parsePdfText(result.text || "");
+        const text = await extractPdfText(buffer);
+        parsed = parsePdfText(text);
       }
       drafts.push({ ...parsed, fileName: file.name, dropboxPath, dropboxNamespace: usedNamespace || null });
     } catch (err) {
