@@ -25,6 +25,20 @@
 const SOURCE_FOLDER = "/Cashflow-facturen-inlezen";
 const PROCESSED_FOLDER = `${SOURCE_FOLDER}/Verwerkt`;
 
+// Dropbox stuurt bij succes/normale API-fouten JSON terug, maar bij
+// route-/argumentvalidatiefouten (bv. verkeerd geformatteerde header) een
+// PLATTE-TEKST 400-body zoals "Error in call to API function ...". Blind
+// res.json() aanroepen crasht daarop. Dit leest altijd eerst als tekst en
+// parseert pas daarna, zodat de échte Dropbox-foutmelding zichtbaar blijft.
+async function safeJson(res) {
+  const raw = await res.text();
+  try {
+    return { data: JSON.parse(raw), raw };
+  } catch {
+    return { data: null, raw };
+  }
+}
+
 async function getAccessToken() {
   const params = new URLSearchParams({
     grant_type: "refresh_token",
@@ -37,9 +51,9 @@ async function getAccessToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
   });
-  const data = await res.json();
+  const { data, raw } = await safeJson(res);
   if (!res.ok) {
-    throw new Error(`Dropbox-token vernieuwen mislukt: ${data.error_description || data.error || res.status}`);
+    throw new Error(`Dropbox-token vernieuwen mislukt: ${data?.error_description || data?.error || raw || res.status}`);
   }
   return data.access_token;
 }
@@ -50,8 +64,8 @@ async function getAccountDiagnostics(accessToken) {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    const data = await res.json();
-    if (!res.ok) return { email: `(kon account niet ophalen: ${data.error_summary || res.status})`, rootInfo: null };
+    const { data, raw } = await safeJson(res);
+    if (!res.ok) return { email: `(kon account niet ophalen: ${data?.error_summary || raw || res.status})`, rootInfo: null };
     return { email: data.email, rootInfo: data.root_info || null };
   } catch (err) {
     return { email: `(kon account niet ophalen: ${err.message})`, rootInfo: null };
@@ -71,8 +85,8 @@ async function listFolderWithRoot(accessToken, path, pathRootNamespaceId) {
     headers,
     body: JSON.stringify({ path, recursive: false }),
   });
-  const data = await res.json();
-  return { ok: res.ok, data };
+  const { data, raw } = await safeJson(res);
+  return { ok: res.ok, data, raw };
 }
 
 async function listSourceFiles(accessToken) {
@@ -83,8 +97,12 @@ async function listSourceFiles(accessToken) {
     return { files: filtered, allNames: rawFiles.map((e) => e.name), usedNamespace: null };
   }
 
-  if (!primary.data?.error_summary || !primary.data.error_summary.includes("not_found")) {
-    throw new Error(`Dropbox list_folder mislukt: ${primary.data.error_summary || "onbekende fout"}`);
+  const primaryErrorSummary = primary.data?.error_summary;
+  if (!primaryErrorSummary || !primaryErrorSummary.includes("not_found")) {
+    // Geen herkenbare "not_found" JSON-fout -> waarschijnlijk de platte-
+    // tekst-variant (argumentfout) of iets anders onverwachts. Toon de
+    // ruwe Dropbox-respons rechtstreeks, geen verdere gok-rondes.
+    throw new Error(`Dropbox list_folder mislukt: ${primaryErrorSummary || primary.raw || "onbekende fout"}`);
   }
 
   // Niet gevonden op de standaard root — mogelijk een Team-Space/namespace-
@@ -101,6 +119,14 @@ async function listSourceFiles(accessToken) {
       const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
       return { files: filtered, allNames: rawFiles.map((e) => e.name), usedNamespace: homeNamespaceId };
     }
+    // Ook de namespace-poging gaf geen normale JSON-not_found-fout -> toon
+    // die ruwe fout meteen, samen met de rest van de diagnose hieronder.
+    if (!retry.data?.error_summary?.includes("not_found")) {
+      throw new Error(
+        `Dropbox list_folder (met home-namespace) mislukt: ${retry.data?.error_summary || retry.raw || "onbekende fout"}. ` +
+        `Gekoppeld account: ${email}.`
+      );
+    }
   }
 
   // Ook met home-namespace niet gevonden (of geen team-namespace-verschil) —
@@ -109,7 +135,7 @@ async function listSourceFiles(accessToken) {
   const rootRes = await listFolderWithRoot(accessToken, "");
   const rootNames = rootRes.ok
     ? (rootRes.data.entries || []).map((e) => e.name)
-    : [`(kon root niet lezen: ${rootRes.data.error_summary || "onbekende fout"})`];
+    : [`(kon root niet lezen: ${rootRes.data?.error_summary || rootRes.raw || "onbekende fout"})`];
   throw new Error(
     `Map "${SOURCE_FOLDER}" niet gevonden via de Dropbox-API. ` +
     `Gekoppeld account: ${email}. ` +
@@ -257,12 +283,12 @@ async function handleMove(req, res) {
     headers,
     body: JSON.stringify({ from_path: body.path, to_path: destPath, autorename: true }),
   });
-  const moveData = await moveRes.json();
+  const { data: moveData, raw: moveRaw } = await safeJson(moveRes);
   if (!moveRes.ok) {
-    res.status(502).json({ error: "Verplaatsen naar 'Verwerkt' mislukt.", detail: moveData });
+    res.status(502).json({ error: "Verplaatsen naar 'Verwerkt' mislukt.", detail: moveData || moveRaw });
     return;
   }
-  res.status(200).json({ status: "ok", movedTo: moveData.metadata?.path_display || destPath });
+  res.status(200).json({ status: "ok", movedTo: moveData?.metadata?.path_display || destPath });
 }
 
 async function handleList(req, res) {
