@@ -265,6 +265,23 @@ function parsePdfText(rawText) {
   };
 }
 
+// Bouwt de nieuwe bestandsnaam bij verplaatsen naar Verwerkt:
+// debiteur_YYYYMMDD_bedrag.ext (YYYYMMDD = factuurdatum). Valt terug op de
+// oorspronkelijke bestandsnaam als er onvoldoende gegevens zijn (bv. bij
+// handmatig overslaan/oude aanroepen zonder rename-info).
+function buildProcessedFilename(originalName, renameInfo) {
+  const extMatch = originalName.match(/\.[^.]+$/);
+  const ext = extMatch ? extMatch[0] : "";
+  if (!renameInfo) return originalName;
+  const { counterparty, invoiceDate, amount } = renameInfo;
+  const sanitize = (s) => (s || "").replace(/[\\/:*?"<>|]/g, "").trim().replace(/\s+/g, " ").slice(0, 60);
+  const debiteur = sanitize(counterparty) || "Onbekend";
+  const yyyymmdd = /^\d{4}-\d{2}-\d{2}$/.test(invoiceDate || "") ? invoiceDate.replace(/-/g, "") : null;
+  const bedrag = amount !== undefined && amount !== null && amount !== "" ? String(amount).replace(/[\\/:*?"<>|]/g, "") : null;
+  if (!yyyymmdd || !bedrag) return originalName; // te weinig info om zinvol te hernoemen
+  return `${debiteur}_${yyyymmdd}_${bedrag}${ext}`;
+}
+
 async function handleMove(req, res) {
   let body = req.body;
   if (typeof body === "string") {
@@ -275,7 +292,8 @@ async function handleMove(req, res) {
     return;
   }
   const accessToken = await getAccessToken();
-  const filename = body.path.split("/").pop();
+  const originalFilename = body.path.split("/").pop();
+  const filename = buildProcessedFilename(originalFilename, body.renameInfo);
   const destPath = `${PROCESSED_FOLDER}/${filename}`;
   const headers = {
     Authorization: `Bearer ${accessToken}`,
