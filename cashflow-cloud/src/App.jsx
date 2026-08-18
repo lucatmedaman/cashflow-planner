@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.16.1";
+const APP_VERSION = "2.16.2";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2369,13 +2369,13 @@ export default function CashflowPlanner() {
   // Verplaatst het Dropbox-bestand van deze draft naar de submap Verwerkt.
   // Wordt aangeroepen NA succesvol aanmaken/bijwerken van de post — nooit
   // ervoor, zodat een mislukte post-creatie het bestand niet "kwijt" maakt.
-  async function moveDropboxFileToVerwerkt(dropboxPath) {
+  async function moveDropboxFileToVerwerkt(dropboxPath, dropboxNamespace) {
     if (!dropboxPath) return;
     try {
       const res = await fetch("/api/dropbox-facturen-inlezen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move", path: dropboxPath }),
+        body: JSON.stringify({ action: "move", path: dropboxPath, namespace: dropboxNamespace || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -2492,9 +2492,10 @@ export default function CashflowPlanner() {
       // Dropbox-wachtrij: bestand pas nu (na succesvolle post) verplaatsen
       // naar Verwerkt, en meteen het volgende item in de wachtrij openen.
       const finishedDropboxPath = ublDraft.dropboxPath;
+      const finishedDropboxNamespace = ublDraft.dropboxNamespace;
       setUblDraft(null);
       if (finishedDropboxPath) {
-        moveDropboxFileToVerwerkt(finishedDropboxPath);
+        moveDropboxFileToVerwerkt(finishedDropboxPath, finishedDropboxNamespace);
         openNextDropboxDraft();
       }
     } catch (err) {
