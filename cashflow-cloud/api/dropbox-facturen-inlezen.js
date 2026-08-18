@@ -44,6 +44,19 @@ async function getAccessToken() {
   return data.access_token;
 }
 
+async function getCurrentAccountEmail(accessToken) {
+  try {
+    const res = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const data = await res.json();
+    return res.ok ? data.email : `(kon account niet ophalen: ${data.error_summary || res.status})`;
+  } catch (err) {
+    return `(kon account niet ophalen: ${err.message})`;
+  }
+}
+
 async function listSourceFiles(accessToken) {
   const res = await fetch("https://api.dropboxapi.com/2/files/list_folder", {
     method: "POST",
@@ -55,13 +68,34 @@ async function listSourceFiles(accessToken) {
   });
   const data = await res.json();
   if (!res.ok) {
-    // Map bestaat nog niet (bv. eerste keer, "Verwerkt" nog niet aangemaakt) -> gewoon leeg.
-    if (data?.error_summary && data.error_summary.includes("not_found")) return [];
+    if (data?.error_summary && data.error_summary.includes("not_found")) {
+      // Niet stilzwijgend als "leeg" behandelen — dit kan ook een verkeerd
+      // gekoppeld account of een nog niet aangemaakte map zijn. Diagnose
+      // erbij: welk account is gekoppeld, en wat ziet de API wél op
+      // app-root-niveau (path "")?
+      const [email, rootRes] = await Promise.all([
+        getCurrentAccountEmail(accessToken),
+        fetch("https://api.dropboxapi.com/2/files/list_folder", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ path: "", recursive: false }),
+        }),
+      ]);
+      const rootData = await rootRes.json();
+      const rootNames = rootRes.ok
+        ? (rootData.entries || []).map((e) => e.name)
+        : [`(kon root niet lezen: ${rootData.error_summary || rootRes.status})`];
+      throw new Error(
+        `Map "${SOURCE_FOLDER}" niet gevonden via de Dropbox-API. ` +
+        `Gekoppeld account: ${email}. ` +
+        `Wat de API op app-root-niveau ziet: ${rootNames.length ? rootNames.join(", ") : "(leeg)"}.`
+      );
+    }
     throw new Error(`Dropbox list_folder mislukt: ${data.error_summary || res.status}`);
   }
-  return (data.entries || []).filter(
-    (e) => e[".tag"] === "file" && /\.(xml|pdf)$/i.test(e.name)
-  );
+  const rawFiles = (data.entries || []).filter((e) => e[".tag"] === "file");
+  const filtered = rawFiles.filter((e) => /\.(xml|pdf)$/i.test(e.name));
+  return { files: filtered, allNames: rawFiles.map((e) => e.name) };
 }
 
 async function downloadFile(accessToken, path) {
@@ -203,7 +237,20 @@ async function handleMove(req, res) {
 
 async function handleList(req, res) {
   const accessToken = await getAccessToken();
-  const files = await listSourceFiles(accessToken);
+  const { files, allNames } = await listSourceFiles(accessToken);
+
+  if (files.length === 0) {
+    res.status(200).json({
+      status: "ok",
+      count: 0,
+      drafts: [],
+      // Diagnose: wat staat er letterlijk in de map, ongeacht extensiefilter —
+      // zichtbaar in de netwerktab/response als "geen nieuwe bestanden"
+      // onverwacht terugkomt terwijl er wel een bestand lokaal zichtbaar is.
+      debugAllFilesInFolder: allNames,
+    });
+    return;
+  }
 
   const drafts = [];
   for (const file of files) {
