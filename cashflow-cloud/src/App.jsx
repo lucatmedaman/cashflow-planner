@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.19.0";
+const APP_VERSION = "2.19.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3674,9 +3674,9 @@ export default function CashflowPlanner() {
                       <span className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
                         {formatDateLabel(date)}
                       </span>
-                      <span className="text-[11px] text-slate-300 font-sans not-italic">({rows.length})</span>
                     </span>
                     <span className="font-num text-xs font-medium shrink-0">
+                      <span className="text-[11px] text-slate-300 font-sans mr-1.5">{rows.length}×</span>
                       {dateIn > 0 && dateUit > 0 && (
                         <span className="text-[#93999F] font-normal mr-1.5">
                           +{eur(dateIn)} / −{eur(dateUit)}
