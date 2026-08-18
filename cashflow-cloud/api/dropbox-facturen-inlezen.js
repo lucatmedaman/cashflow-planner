@@ -266,6 +266,36 @@ async function handleMove(req, res) {
   res.status(200).json({ status: "ok", movedTo: moveData?.metadata?.path_display || destPath });
 }
 
+async function handleDiagnose(req, res) {
+  const accessToken = await getAccessToken();
+  const { email } = await getAccountDiagnostics(accessToken);
+  const testPath = `${SOURCE_FOLDER}/api-test-${Date.now()}.txt`;
+  const uploadRes = await fetch("https://content.dropboxapi.com/2/files/upload", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Dropbox-API-Arg": JSON.stringify({ path: testPath, mode: "add", autorename: true }),
+      "Content-Type": "application/octet-stream",
+    },
+    body: "Dit is een testbestand van /api/dropbox-facturen-inlezen?diagnose=1 — mag verwijderd worden.",
+  });
+  const { data: uploadData, raw: uploadRaw } = await safeJson(uploadRes);
+  if (!uploadRes.ok) {
+    res.status(502).json({
+      error: "Test-upload mislukt.",
+      account: email,
+      detail: uploadData || uploadRaw,
+    });
+    return;
+  }
+  res.status(200).json({
+    status: "ok",
+    account: email,
+    uploadedTo: uploadData.path_display,
+    note: "Zoek dit bestand op dropbox.com (browser) — de map waarin het staat is de ECHTE locatie die de API als root gebruikt. Mag daarna verwijderd worden.",
+  });
+}
+
 async function handleList(req, res) {
   const accessToken = await getAccessToken();
   const { files, allNames, usedNamespace } = await listSourceFiles(accessToken);
@@ -328,6 +358,10 @@ export default async function handler(req, res) {
     }
     if (req.method !== "GET") {
       res.status(405).json({ error: "Alleen GET of POST wordt ondersteund." });
+      return;
+    }
+    if (req.query?.diagnose) {
+      await handleDiagnose(req, res);
       return;
     }
     await handleList(req, res);
