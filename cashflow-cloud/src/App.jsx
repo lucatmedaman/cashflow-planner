@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.20.0";
+const APP_VERSION = "2.21.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -844,6 +844,8 @@ export default function CashflowPlanner() {
   const [dropboxQueue, setDropboxQueue] = useState([]); // resterende drafts, wachtrij na "Dropbox-facturen inlezen"
   const [dropboxQueueTotal, setDropboxQueueTotal] = useState(0);
   const [dropboxLoading, setDropboxLoading] = useState(false);
+  const [dropboxPendingMoves, setDropboxPendingMoves] = useState([]); // afgewerkte items (fase 1 klaar) die nog naar Verwerkt moeten (fase 2)
+  const [dropboxMoving, setDropboxMoving] = useState(false);
   const [ublPreviewUrl, setUblPreviewUrl] = useState(null); // PDF-voorbeeld naast het reviewscherm
 
   // PDF-voorbeeld tonen naast het reviewscherm: bij handmatige upload direct
@@ -2446,7 +2448,11 @@ export default function CashflowPlanner() {
     if (!queue || queue.length === 0) {
       setDropboxQueue([]);
       setDropboxQueueTotal(0);
-      setImportNotice("Alle Dropbox-facturen uit de wachtrij verwerkt.");
+      setImportNotice(
+        dropboxPendingMoves.length > 0
+          ? `Fase 1 klaar: alle facturen ingelezen. Gebruik "Dropbox: verplaats naar Verwerkt (${dropboxPendingMoves.length})" in het Acties-menu voor fase 2.`
+          : "Alle Dropbox-facturen uit de wachtrij verwerkt."
+      );
       return;
     }
     const [next, ...rest] = queue;
@@ -2457,25 +2463,48 @@ export default function CashflowPlanner() {
     });
     setUblError("");
   }
-  // Verplaatst het Dropbox-bestand van deze draft naar de submap Verwerkt,
-  // en hernoemt het meteen naar debiteur_YYYYMMDD_bedrag (YYYYMMDD =
-  // factuurdatum) — op basis van de gegevens die de gebruiker net bevestigd
-  // heeft in het reviewscherm. Wordt aangeroepen NA succesvol aanmaken van
-  // de post — nooit ervoor, zodat een mislukte post-creatie het bestand
-  // niet "kwijt" maakt.
-  async function moveDropboxFileToVerwerkt(dropboxPath, dropboxNamespace, renameInfo) {
+  // FASE 1 (inlezen): verzamelt enkel de gegevens die nodig zijn om het
+  // bestand later (fase 2) te hernoemen/verplaatsen — er gebeurt hier nog
+  // NIETS in Dropbox. Wordt aangeroepen NA succesvol aanmaken van de post.
+  function queueDropboxMove(dropboxPath, dropboxNamespace, renameInfo, fileName) {
     if (!dropboxPath) return;
-    try {
-      const res = await fetch("/api/dropbox-facturen-inlezen", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move", path: dropboxPath, namespace: dropboxNamespace || undefined, renameInfo }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    } catch (err) {
-      // Post staat al in Airtable — dit alleen melden, niet blokkeren.
-      setAirtableError(`Post aangemaakt, maar bestand verplaatsen naar "Verwerkt" mislukt: ${err.message}. Verplaats het bestand best zelf in Dropbox om dubbele verwerking te vermijden.`);
+    setDropboxPendingMoves((prev) => [...prev, { dropboxPath, dropboxNamespace, renameInfo, fileName }]);
+  }
+  // FASE 2 (opruimen): verplaatst alle in fase 1 verzamelde bestanden in één
+  // keer naar Verwerkt (met hernoeming incl. boekhouding). Losse, expliciete
+  // actie — gebeurt dus niet meer automatisch per item tijdens het inlezen.
+  async function runDropboxPendingMoves() {
+    if (dropboxPendingMoves.length === 0) return;
+    setDropboxMoving(true);
+    const stillPending = [];
+    const failures = [];
+    for (const move of dropboxPendingMoves) {
+      try {
+        const res = await fetch("/api/dropbox-facturen-inlezen", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "move",
+            path: move.dropboxPath,
+            namespace: move.dropboxNamespace || undefined,
+            renameInfo: move.renameInfo,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      } catch (err) {
+        stillPending.push(move); // blijft in de wachtrij staan, kan opnieuw geprobeerd worden
+        failures.push(`${move.fileName || move.dropboxPath}: ${err.message}`);
+      }
+    }
+    setDropboxMoving(false);
+    setDropboxPendingMoves(stillPending);
+    if (failures.length > 0) {
+      setAirtableError(
+        `Fase 2 (verplaatsen naar Verwerkt): ${dropboxPendingMoves.length - failures.length}/${dropboxPendingMoves.length} gelukt. Mislukt (blijven in de wachtrij staan, opnieuw proberen mogelijk):\n${failures.join("\n")}`
+      );
+    } else {
+      setImportNotice("Fase 2 klaar: alle ingelezen bestanden verplaatst naar Verwerkt.");
     }
   }
 
@@ -2583,18 +2612,22 @@ export default function CashflowPlanner() {
         const filename = `${sanitize(ublDraft.counterparty) || "Factuur"} - ${ublDraft.dueDate} - ${ublDraft.amount}.pdf`;
         setUblFollowUp({ pdfFile: ublDraft.pdfFile, filename, entity });
       }
-      // Dropbox-wachtrij: bestand pas nu (na succesvolle post) verplaatsen
-      // naar Verwerkt, en meteen het volgende item in de wachtrij openen.
+      // Fase 1 klaar voor dit item: enkel de rename-gegevens onthouden voor
+      // fase 2 (aparte, latere actie) — het bestand blijft nu nog gewoon
+      // in de bronmap staan, er gebeurt hier niets in Dropbox.
       const finishedDropboxPath = ublDraft.dropboxPath;
       const finishedDropboxNamespace = ublDraft.dropboxNamespace;
+      const finishedEntity = entities.find((en) => en.id === ublDraft.entityId);
       const finishedRenameInfo = {
         counterparty: ublDraft.counterparty,
         invoiceDate: ublDraft.invoiceDate, // YYYY-MM-DD, wordt server-side naar YYYYMMDD omgezet
         amount: ublDraft.amount,
+        entityName: finishedEntity?.name || "",
       };
+      const finishedFileName = ublDraft.fileName;
       setUblDraft(null);
       if (finishedDropboxPath) {
-        moveDropboxFileToVerwerkt(finishedDropboxPath, finishedDropboxNamespace, finishedRenameInfo);
+        queueDropboxMove(finishedDropboxPath, finishedDropboxNamespace, finishedRenameInfo, finishedFileName);
         openNextDropboxDraft();
       }
     } catch (err) {
@@ -3409,11 +3442,25 @@ export default function CashflowPlanner() {
                 <button
                   onClick={() => { loadDropboxQueue(); setShowActionsMenu(false); }}
                   disabled={dropboxLoading}
-                  title="Nieuwe bestanden uit de Dropbox-map 'Cashflow-facturen-inlezen' één voor één inlezen en controleren"
+                  title="Fase 1: nieuwe bestanden uit de Dropbox-map 'Cashflow-facturen-inlezen' één voor één inlezen en controleren"
                   className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 >
                   {dropboxLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 mt-0.5 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
-                  <span className="flex-1 text-left">Dropbox-facturen inlezen</span>
+                  <span className="flex-1 text-left">Dropbox: fase 1 — inlezen</span>
+                </button>
+                <button
+                  onClick={() => { runDropboxPendingMoves(); setShowActionsMenu(false); }}
+                  disabled={dropboxMoving || dropboxPendingMoves.length === 0}
+                  title="Fase 2: reeds ingelezen bestanden hernoemen (incl. boekhouding) en verplaatsen naar de submap Verwerkt"
+                  className="w-full flex items-start gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  {dropboxMoving ? <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 mt-0.5 shrink-0" /> : <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />}
+                  <span className="flex-1 text-left">
+                    Dropbox: fase 2 — verplaats naar Verwerkt
+                    {dropboxPendingMoves.length > 0 && (
+                      <span className="block text-[10px] text-slate-400">{dropboxPendingMoves.length} klaar om te verplaatsen</span>
+                    )}
+                  </span>
                 </button>
                 <button
                   onClick={() => { triggerPocketsmithSync(); setShowActionsMenu(false); }}
