@@ -1,0 +1,47 @@
+---
+interface Props {
+  href: string;
+  titel: string;
+  kort: string;
+  doelgroepen: readonly string[];
+  /** Kopniveau, zodat de kopstructuur van de omliggende pagina klopt. */
+  niveau?: 2 | 3;
+}
+
+const { href, titel, kort, doelgroepen, niveau = 3 } = Astro.props;
+const Kop = `h${niveau}` as 'h2' | 'h3';
+---
+
+<a class="kaart kaart--link dienst" href={href}>
+  <Kop>{titel}</Kop>
+  <p>{kort}</p>
+  <ul class="labels">
+    {doelgroepen.map((d) => <li class="label">{d}</li>)}
+  </ul>
+  <span class="dienst__meer" aria-hidden="true">Meer over deze dienst →</span>
+</a>
+
+<style>
+  .dienst {
+    justify-content: flex-start;
+  }
+
+  .dienst :is(h2, h3) {
+    font-size: 1.12rem;
+  }
+
+  .dienst .labels {
+    margin-top: auto;
+    padding-top: var(--s-2);
+  }
+
+  .dienst__meer {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--c-primair-licht);
+  }
+
+  .dienst:hover .dienst__meer {
+    text-decoration: underline;
+  }
+</style>

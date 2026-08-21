@@ -1,0 +1,160 @@
+---
+import Base from '../layouts/Base.astro';
+import PaginaKop from '../components/PaginaKop.astro';
+import ContactFormulier from '../components/ContactFormulier.astro';
+import Placeholder from '../components/Placeholder.astro';
+import { site, isPlaceholder } from '../data/site';
+
+const c = site.contact;
+---
+
+<Base
+  titel="Contact"
+  beschrijving="Neem contact op met Medaman in Lokeren voor een vraag over ziekenhuisdata, benchmarking, coderingsaudits of rapportage."
+>
+  <PaginaKop
+    eyebrow="Contact"
+    titel="Laat weten waar u mee zit"
+    intro="Een korte beschrijving van uw vraag en van de gegevens die u ter beschikking heeft, volstaat om een eerste inschatting te maken. Wij laten ook weten wanneer een analyse níét zinvol is."
+    kruimels={[{ label: 'Home', href: '/' }]}
+    huidig="Contact"
+  />
+
+  <section class="sectie">
+    <div class="container contact__raster">
+      <div>
+        <h2>Stel uw vraag</h2>
+        <p class="lede contact__intro">
+          We antwoorden doorgaans binnen twee werkdagen.
+        </p>
+        <ContactFormulier />
+      </div>
+
+      <aside class="contact__zij" aria-label="Contactgegevens">
+        <div class="zijblok">
+          <h2>Rechtstreeks</h2>
+          <dl class="gegevens">
+            <div>
+              <dt>E-mail</dt>
+              <dd>
+                <Placeholder
+                  waarde={c.email}
+                  href={isPlaceholder(c.email) ? undefined : `mailto:${c.email}`}
+                />
+              </dd>
+            </div>
+            <div>
+              <dt>Telefoon</dt>
+              <dd>
+                <Placeholder
+                  waarde={c.telefoon}
+                  href={isPlaceholder(c.telefoon)
+                    ? undefined
+                    : `tel:${c.telefoon.replace(/\s/g, '')}`}
+                />
+              </dd>
+            </div>
+            <div>
+              <dt>Bereikbaarheid</dt>
+              <dd>{c.bereikbaarheid}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="zijblok">
+          <h2>Adres</h2>
+          <address>
+            {site.naam}<br />
+            <Placeholder waarde={c.straat} /><br />
+            <Placeholder waarde={c.postcode} />
+            {c.gemeente}<br />
+            {c.land}
+          </address>
+        </div>
+
+        <div class="zijblok zijblok--nota">
+          <h2>Over uw gegevens</h2>
+          <p>
+            Wat u hier invult, gebruiken we uitsluitend om uw vraag te beantwoorden.
+            Stuur via dit formulier geen patiëntgegevens door — voor de uitwisseling van
+            data maken we vooraf afspraken en een verwerkersovereenkomst.
+          </p>
+          <p><a href="/privacy/">Lees de privacyverklaring →</a></p>
+        </div>
+      </aside>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .contact__raster {
+    display: grid;
+    gap: var(--s-7);
+    align-items: start;
+  }
+
+  @media (min-width: 980px) {
+    .contact__raster {
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
+      gap: var(--s-8);
+    }
+  }
+
+  .contact__intro {
+    margin: var(--s-3) 0 var(--s-6);
+  }
+
+  .contact__zij {
+    display: grid;
+    gap: var(--s-4);
+  }
+
+  .zijblok {
+    border: var(--rand);
+    border-radius: var(--radius-lg);
+    padding: var(--s-5);
+  }
+
+  .zijblok h2 {
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--c-accent);
+    margin-bottom: var(--s-3);
+  }
+
+  .zijblok p {
+    color: var(--c-tekst-gedempt);
+    font-size: 0.93rem;
+  }
+
+  .zijblok p + p {
+    margin-top: var(--s-3);
+  }
+
+  .zijblok--nota {
+    background: var(--c-bg-zacht);
+  }
+
+  .gegevens {
+    display: grid;
+    gap: var(--s-3);
+    margin: 0;
+  }
+
+  .gegevens dt {
+    font-size: 0.8rem;
+    color: var(--c-tekst-gedempt);
+  }
+
+  .gegevens dd {
+    margin: 0;
+    font-weight: 550;
+  }
+
+  address {
+    font-style: normal;
+    line-height: 1.8;
+    color: var(--c-tekst-gedempt);
+  }
+</style>

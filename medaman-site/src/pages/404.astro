@@ -1,0 +1,90 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+
+const diensten = (await getCollection('diensten')).sort(
+  (a, b) => a.data.volgorde - b.data.volgorde,
+);
+---
+
+<Base
+  titel="Pagina niet gevonden"
+  beschrijving="Deze pagina bestaat niet of is verplaatst."
+>
+  <section class="sectie">
+    <div class="container nietgevonden">
+      <span class="eyebrow">Foutcode 404</span>
+      <h1>Deze pagina bestaat niet</h1>
+      <p class="lede">
+        De link klopt niet meer, of de pagina is verplaatst. Hieronder staat waar u
+        waarschijnlijk naartoe wilde.
+      </p>
+
+      <div class="btn-rij">
+        <a class="btn btn--primair" href="/">Naar de startpagina</a>
+        <a class="btn btn--secundair" href="/contact/">Contact opnemen</a>
+      </div>
+
+      <div class="nietgevonden__lijst">
+        <h2>Diensten</h2>
+        <ul>
+          {
+            diensten.map((d) => (
+              <li>
+                <a href={`/diensten/${d.id}/`}>{d.data.titel}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .nietgevonden {
+    max-width: var(--breedte-tekst);
+    padding-block: var(--s-6);
+  }
+
+  .nietgevonden .lede {
+    margin: var(--s-4) 0 var(--s-6);
+  }
+
+  .nietgevonden__lijst {
+    margin-top: var(--s-8);
+    padding-top: var(--s-5);
+    border-top: var(--rand);
+  }
+
+  .nietgevonden__lijst h2 {
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--c-accent);
+    margin-bottom: var(--s-4);
+  }
+
+  .nietgevonden__lijst ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-3);
+  }
+
+  @media (min-width: 640px) {
+    .nietgevonden__lijst ul {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .nietgevonden__lijst a {
+    text-decoration: none;
+    font-weight: 550;
+  }
+
+  .nietgevonden__lijst a:hover {
+    text-decoration: underline;
+  }
+</style>

@@ -1,0 +1,39 @@
+---
+interface Props {
+  titel?: string;
+  tekst?: string;
+}
+
+const {
+  titel = 'Een concrete vraag over uw cijfers?',
+  tekst = 'Een kennismakingsgesprek van een half uur volstaat meestal om te bepalen of uw data de vraag kan beantwoorden en wat een analyse zou inhouden.',
+} = Astro.props;
+---
+
+<section class="sectie sectie--diep">
+  <div class="container cta">
+    <div>
+      <h2>{titel}</h2>
+      <p class="lede">{tekst}</p>
+    </div>
+    <div class="btn-rij">
+      <a class="btn btn--op-diep" href="/contact/">Contact opnemen</a>
+      <a class="btn btn--lijn-op-diep" href="/diensten/">Diensten bekijken</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .cta {
+    display: grid;
+    gap: var(--s-5);
+    align-items: center;
+  }
+
+  @media (min-width: 900px) {
+    .cta {
+      grid-template-columns: 1.6fr auto;
+      gap: var(--s-7);
+    }
+  }
+</style>

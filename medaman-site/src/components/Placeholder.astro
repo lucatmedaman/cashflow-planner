@@ -1,0 +1,25 @@
+---
+import { isPlaceholder } from '../data/site';
+
+interface Props {
+  waarde: string;
+  /** Optioneel: maak er een link van (mailto:, tel:) als het geen placeholder is. */
+  href?: string;
+}
+
+const { waarde, href } = Astro.props;
+const leeg = isPlaceholder(waarde);
+const tekst = leeg ? waarde.replace(/^\s*\[\[|\]\]\s*$/g, '') : waarde;
+---
+
+{
+  leeg ? (
+    <span class="ph" title="Nog in te vullen gegeven">
+      {tekst}
+    </span>
+  ) : href ? (
+    <a href={href}>{tekst}</a>
+  ) : (
+    <span>{tekst}</span>
+  )
+}

@@ -1,0 +1,73 @@
+---
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { site, isPlaceholder } from '../data/site';
+import '../styles/global.css';
+
+interface Props {
+  titel: string;
+  beschrijving: string;
+  /** Zet de paginatitel zonder ", Medaman"-suffix. */
+  kaleTitel?: boolean;
+}
+
+const { titel, beschrijving, kaleTitel = false } = Astro.props;
+const paginaTitel = kaleTitel ? titel : `${titel} · ${site.naam}`;
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+
+// Structured data: placeholders horen niet in machineleesbare gegevens thuis,
+// dus die laten we hier weg in plaats van ze mee te publiceren.
+const c = site.contact;
+const jsonLd: Record<string, unknown> = {
+  '@context': 'https://schema.org',
+  '@type': 'ProfessionalService',
+  name: site.naam,
+  description: site.beschrijving,
+  url: Astro.site?.href,
+  areaServed: 'BE',
+  address: {
+    '@type': 'PostalAddress',
+    addressLocality: c.gemeente,
+    addressCountry: 'BE',
+    ...(isPlaceholder(c.straat) ? {} : { streetAddress: c.straat }),
+    ...(isPlaceholder(c.postcode) ? {} : { postalCode: c.postcode }),
+  },
+  ...(isPlaceholder(c.email) ? {} : { email: c.email }),
+  ...(isPlaceholder(c.telefoon) ? {} : { telephone: c.telefoon }),
+};
+---
+
+<!doctype html>
+<html lang="nl-BE">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{paginaTitel}</title>
+    <meta name="description" content={beschrijving} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="generator" content={Astro.generator} />
+
+    <!-- TEST-omgeving: niet indexeren zolang dit een preview is. -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={site.naam} />
+    <meta property="og:title" content={paginaTitel} />
+    <meta property="og:description" content={beschrijving} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:locale" content="nl_BE" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="theme-color" content="#0f3d5c" />
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
+  </head>
+  <body>
+    <a class="skip-link" href="#inhoud">Naar de inhoud</a>
+    <Header />
+    <main id="inhoud">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

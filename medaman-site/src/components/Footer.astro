@@ -1,0 +1,151 @@
+---
+import Logo from './Logo.astro';
+import Placeholder from './Placeholder.astro';
+import { site, isPlaceholder } from '../data/site';
+import { getCollection } from 'astro:content';
+
+const diensten = (await getCollection('diensten')).sort(
+  (a, b) => a.data.volgorde - b.data.volgorde,
+);
+const jaar = new Date().getFullYear();
+const c = site.contact;
+---
+
+<footer class="voet">
+  <div class="container voet__raster">
+    <div class="voet__merk">
+      <Logo variant="licht" />
+      <p>{site.tagline}</p>
+    </div>
+
+    <nav class="voet__kolom" aria-label="Diensten">
+      <h2>Diensten</h2>
+      <ul>
+        {
+          diensten.map((d) => (
+            <li>
+              <a href={`/diensten/${d.id}/`}>{d.data.titel}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <nav class="voet__kolom" aria-label="Bedrijf">
+      <h2>Bedrijf</h2>
+      <ul>
+        <li><a href="/over-ons/">Over ons</a></li>
+        <li><a href="/contact/">Contact</a></li>
+        <li><a href="/privacy/">Privacyverklaring</a></li>
+      </ul>
+    </nav>
+
+    <div class="voet__kolom">
+      <h2>Contact</h2>
+      <address>
+        <Placeholder waarde={c.straat} /><br />
+        <Placeholder waarde={c.postcode} />
+        {c.gemeente}, {c.land}<br />
+        <Placeholder
+          waarde={c.email}
+          href={isPlaceholder(c.email) ? undefined : `mailto:${c.email}`}
+        /><br />
+        <Placeholder
+          waarde={c.telefoon}
+          href={isPlaceholder(c.telefoon) ? undefined : `tel:${c.telefoon.replace(/\s/g, '')}`}
+        />
+      </address>
+    </div>
+  </div>
+
+  <div class="container voet__onder">
+    <p>© {jaar} {site.naam}. Ondernemingsnummer <Placeholder waarde={c.ondernemingsnummer} />.</p>
+    <p class="voet__test">{site.testBanner}</p>
+  </div>
+</footer>
+
+<style>
+  .voet {
+    margin-top: auto;
+    background: var(--c-primair-diep);
+    color: var(--c-tekst-op-diep);
+    padding-block: var(--s-7) var(--s-5);
+    font-size: 0.92rem;
+  }
+
+  .voet__raster {
+    display: grid;
+    gap: var(--s-6);
+    padding-bottom: var(--s-6);
+  }
+
+  @media (min-width: 700px) {
+    .voet__raster {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 980px) {
+    .voet__raster {
+      grid-template-columns: 1.4fr 1fr 1fr 1.1fr;
+    }
+  }
+
+  .voet__merk p {
+    margin-top: var(--s-3);
+    max-width: 26ch;
+    color: rgba(223, 234, 242, 0.75);
+  }
+
+  .voet h2 {
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #6fd8c8;
+    margin-bottom: var(--s-3);
+  }
+
+  .voet ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-2);
+  }
+
+  .voet a {
+    color: var(--c-tekst-op-diep);
+    text-decoration: none;
+  }
+
+  .voet a:hover {
+    color: #fff;
+    text-decoration: underline;
+  }
+
+  .voet address {
+    font-style: normal;
+    line-height: 1.9;
+    color: rgba(223, 234, 242, 0.85);
+  }
+
+  .voet :global(.ph) {
+    color: rgba(223, 234, 242, 0.6);
+    border-bottom-color: rgba(223, 234, 242, 0.35);
+  }
+
+  .voet__onder {
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    padding-top: var(--s-4);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-3) var(--s-5);
+    justify-content: space-between;
+    font-size: 0.84rem;
+    color: rgba(223, 234, 242, 0.65);
+  }
+
+  .voet__test {
+    color: rgba(223, 234, 242, 0.5);
+  }
+</style>

@@ -1,0 +1,81 @@
+---
+interface Props {
+  eyebrow?: string;
+  titel: string;
+  intro?: string;
+  /** Kruimelpad: [{ label, href }] zonder de huidige pagina. */
+  kruimels?: { label: string; href: string }[];
+  huidig?: string;
+}
+
+const { eyebrow, titel, intro, kruimels = [], huidig } = Astro.props;
+---
+
+<section class="pagina-kop">
+  <div class="container">
+    {
+      kruimels.length > 0 && (
+        <nav class="kruimels" aria-label="Kruimelpad">
+          <ol>
+            {kruimels.map((k) => (
+              <li>
+                <a href={k.href}>{k.label}</a>
+              </li>
+            ))}
+            {huidig && <li aria-current="page">{huidig}</li>}
+          </ol>
+        </nav>
+      )
+    }
+    {eyebrow && <span class="eyebrow">{eyebrow}</span>}
+    <h1>{titel}</h1>
+    {intro && <p class="lede">{intro}</p>}
+  </div>
+</section>
+
+<style>
+  .pagina-kop {
+    background: var(--c-bg-zacht);
+    border-bottom: var(--rand);
+    padding-block: clamp(var(--s-6), 4vw, var(--s-8));
+  }
+
+  .pagina-kop h1 {
+    max-width: 20ch;
+  }
+
+  .pagina-kop .lede {
+    margin-top: var(--s-4);
+  }
+
+  .kruimels {
+    margin-bottom: var(--s-4);
+  }
+
+  .kruimels ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.85rem;
+    color: var(--c-tekst-gedempt);
+  }
+
+  .kruimels li + li::before {
+    content: '/';
+    margin-right: var(--s-2);
+    color: var(--c-rand-sterk);
+  }
+
+  .kruimels a {
+    color: var(--c-tekst-gedempt);
+    text-decoration: none;
+  }
+
+  .kruimels a:hover {
+    color: var(--c-primair);
+    text-decoration: underline;
+  }
+</style>

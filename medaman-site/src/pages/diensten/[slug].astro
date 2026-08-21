@@ -1,0 +1,211 @@
+---
+import Base from '../../layouts/Base.astro';
+import PaginaKop from '../../components/PaginaKop.astro';
+import CTA from '../../components/CTA.astro';
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+
+export async function getStaticPaths() {
+  const diensten = await getCollection('diensten');
+  return diensten.map((dienst) => ({
+    params: { slug: dienst.id },
+    props: { dienst },
+  }));
+}
+
+type Props = { dienst: CollectionEntry<'diensten'> };
+
+const { dienst } = Astro.props;
+const d = dienst.data;
+const { Content } = await render(dienst);
+
+const andere = (await getCollection('diensten'))
+  .filter((x) => x.id !== dienst.id)
+  .sort((a, b) => a.data.volgorde - b.data.volgorde)
+  .slice(0, 3);
+---
+
+<Base titel={d.titel} beschrijving={d.seo}>
+  <PaginaKop
+    eyebrow="Dienst"
+    titel={d.titel}
+    intro={d.kort}
+    kruimels={[
+      { label: 'Home', href: '/' },
+      { label: 'Diensten', href: '/diensten/' },
+    ]}
+    huidig={d.titel}
+  />
+
+  <section class="sectie">
+    <div class="container dienst__raster">
+      <div class="dienst__hoofd">
+        <div class="prose">
+          <Content />
+        </div>
+
+        <div class="blok">
+          <h2>Wat we doen</h2>
+          <ul class="lijst">
+            {d.watWeDoen.map((punt) => <li>{punt}</li>)}
+          </ul>
+        </div>
+
+        <div class="blok">
+          <h2>Wat u krijgt</h2>
+          <ul class="lijst lijst--check">
+            {d.watUKrijgt.map((punt) => <li>{punt}</li>)}
+          </ul>
+        </div>
+
+        <div class="blok">
+          <h2>Methodologie en aandachtspunten</h2>
+          <dl class="deflijst">
+            {
+              d.methodologie.map((m) => (
+                <div>
+                  <dt>{m.label}</dt>
+                  <dd>{m.tekst}</dd>
+                </div>
+              ))
+            }
+          </dl>
+        </div>
+      </div>
+
+      <aside class="dienst__zij" aria-label="Bij deze dienst">
+        <div class="zijblok">
+          <h2>Voor wie</h2>
+          <p>{d.voorWie}</p>
+          <ul class="labels">
+            {d.doelgroepen.map((g) => <li class="label">{g}</li>)}
+          </ul>
+        </div>
+
+        <div class="zijblok zijblok--actie">
+          <h2>Vraag over deze dienst?</h2>
+          <p>
+            Vertel kort welke gegevens u beschikbaar heeft, dan laten we weten wat een
+            analyse concreet zou opleveren.
+          </p>
+          <a class="btn btn--primair" href="/contact/">Contact opnemen</a>
+        </div>
+
+        <div class="zijblok">
+          <h2>Andere diensten</h2>
+          <ul class="zijlijst">
+            {
+              andere.map((a) => (
+                <li>
+                  <a href={`/diensten/${a.id}/`}>{a.data.titel}</a>
+                </li>
+              ))
+            }
+          </ul>
+          <p class="zijblok__alles">
+            <a href="/diensten/">Alle diensten bekijken →</a>
+          </p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <CTA
+    titel={`${d.titel} voor uw ziekenhuis?`}
+    tekst="We bekijken vrijblijvend welke gegevens u heeft en wat daar redelijkerwijs uit te halen valt — inclusief wat níét kan."
+  />
+</Base>
+
+<style>
+  .dienst__raster {
+    display: grid;
+    gap: var(--s-7);
+    align-items: start;
+  }
+
+  @media (min-width: 980px) {
+    .dienst__raster {
+      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.85fr);
+      gap: var(--s-8);
+    }
+
+    .dienst__zij {
+      position: sticky;
+      top: 120px;
+    }
+  }
+
+  .dienst__hoofd > * + * {
+    margin-top: var(--s-7);
+  }
+
+  .blok h2 {
+    font-size: 1.32rem;
+    margin-bottom: var(--s-4);
+    padding-bottom: var(--s-3);
+    border-bottom: var(--rand);
+  }
+
+  .dienst__zij {
+    display: grid;
+    gap: var(--s-4);
+  }
+
+  .zijblok {
+    border: var(--rand);
+    border-radius: var(--radius-lg);
+    padding: var(--s-5);
+    background: var(--c-bg);
+  }
+
+  .zijblok h2 {
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--c-accent);
+    margin-bottom: var(--s-3);
+  }
+
+  .zijblok p {
+    color: var(--c-tekst-gedempt);
+    font-size: 0.94rem;
+  }
+
+  .zijblok .labels {
+    margin-top: var(--s-4);
+  }
+
+  .zijblok--actie {
+    background: var(--c-bg-zacht);
+  }
+
+  .zijblok--actie .btn {
+    margin-top: var(--s-4);
+    width: 100%;
+    justify-content: center;
+  }
+
+  .zijlijst {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-3);
+  }
+
+  .zijlijst a {
+    text-decoration: none;
+    font-weight: 550;
+    font-size: 0.95rem;
+  }
+
+  .zijlijst a:hover {
+    text-decoration: underline;
+  }
+
+  .zijblok__alles {
+    margin-top: var(--s-4);
+    padding-top: var(--s-3);
+    border-top: var(--rand);
+    font-size: 0.9rem;
+  }
+</style>

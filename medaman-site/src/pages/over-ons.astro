@@ -1,0 +1,239 @@
+---
+import Base from '../layouts/Base.astro';
+import PaginaKop from '../components/PaginaKop.astro';
+import CTA from '../components/CTA.astro';
+import { site } from '../data/site';
+
+const principes = [
+  {
+    titel: 'Onafhankelijk',
+    tekst:
+      'We hebben geen belang bij een bepaalde uitkomst. Als de data een vermoeden niet bevestigt, staat dat zo in het rapport.',
+  },
+  {
+    titel: 'Navolgbaar',
+    tekst:
+      'Elke bevinding is terug te volgen tot de dossiers waarop ze steunt. Definities, in- en exclusies en periodes staan expliciet vermeld.',
+  },
+  {
+    titel: 'Terughoudend bij kleine aantallen',
+    tekst:
+      'Bij lage aantallen tonen we spreiding en onzekerheid, en trekken we geen conclusies die het cijfermateriaal niet draagt.',
+  },
+  {
+    titel: 'Overdraagbaar',
+    tekst:
+      'We bouwen zo dat uw eigen diensten het kunnen overnemen. Afhankelijkheid van een externe partij is geen doel op zich.',
+  },
+];
+
+const gegevensafspraken = [
+  {
+    label: 'Verwerkersovereenkomst',
+    tekst:
+      'Voor elke opdracht waarbij persoonsgegevens verwerkt worden, sluiten we vooraf een verwerkersovereenkomst met het ziekenhuis als verwerkingsverantwoordelijke.',
+  },
+  {
+    label: 'Dataminimalisatie',
+    tekst:
+      'We vragen enkel de velden op die de analyse werkelijk nodig heeft. Wat de vraag niet beantwoordt, hoeft ook niet doorgestuurd te worden.',
+  },
+  {
+    label: 'Pseudonimisering',
+    tekst:
+      'Waar de analyse het toelaat, werken we met gepseudonimiseerde gegevens. De sleutel blijft bij het ziekenhuis.',
+  },
+  {
+    label: 'Bewaartermijn',
+    tekst:
+      'Bewaartermijn en verwijdering na afloop van de opdracht worden op voorhand vastgelegd, niet achteraf besproken.',
+  },
+  {
+    label: 'Toegang',
+    tekst:
+      'Toegang tot de gegevens blijft beperkt tot de medewerkers die aan de opdracht werken, en wordt gelogd.',
+  },
+];
+---
+
+<Base
+  titel="Over ons"
+  beschrijving="Medaman is een healthcare data analytics bedrijf in Lokeren dat werkt voor Belgische ziekenhuizen: onafhankelijk, methodologisch transparant en zorgvuldig met gevoelige gegevens."
+>
+  <PaginaKop
+    eyebrow="Over ons"
+    titel="Een analysebureau dat de taal van het ziekenhuis spreekt"
+    intro="Medaman is gevestigd in Lokeren en werkt voor Belgische ziekenhuizen. Wij zijn geen algemeen data-analysebureau dat ook toevallig in de zorg actief is — dit is het enige domein waarin we werken."
+    kruimels={[{ label: 'Home', href: '/' }]}
+    huidig="Over ons"
+  />
+
+  <section class="sectie">
+    <div class="container tweekolom">
+      <div class="prose">
+        <h2>Wat we doen</h2>
+        <p>
+          Ziekenhuizen registreren enorm veel: diagnoses, verrichtingen, verblijven,
+          verpleegkundige zorgzwaarte, facturatiegegevens. Die registratie dient in de
+          eerste plaats een administratief doel, maar ze bevat daarnaast een gedetailleerd
+          beeld van wat er in het huis gebeurt.
+        </p>
+        <p>
+          Dat beeld eruit halen vraagt meer dan een analysetool. Het vraagt kennis van
+          codeerregels, van groepering en van de manier waarop registratie en financiering
+          in België aan elkaar hangen. Zonder die kennis wordt elke afwijking een vraagteken
+          — en met die kennis meestal een verklaarbaar verhaal, met hier en daar een punt
+          dat werkelijk aandacht verdient.
+        </p>
+        <p>
+          Wij doen dat werk: van coderingsaudit tot benchmark, van ligduuranalyse tot
+          periodieke rapportage. Steeds op de eigen data van het ziekenhuis, en steeds op
+          een manier die intern navolgbaar blijft.
+        </p>
+      </div>
+
+      <div class="feiten">
+        <h2 class="visueel-verborgen">Kerngegevens</h2>
+        <dl>
+          <div>
+            <dt>Vestiging</dt>
+            <dd>{site.contact.gemeente}, {site.contact.land}</dd>
+          </div>
+          <div>
+            <dt>Domein</dt>
+            <dd>Healthcare data analytics</dd>
+          </div>
+          <div>
+            <dt>Werkgebied</dt>
+            <dd>Belgische ziekenhuizen</dd>
+          </div>
+          <div>
+            <dt>Doelgroepen</dt>
+            <dd>Directie, coderingsdienst, kwaliteitsafdeling</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="sectie sectie--zacht">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Werkwijze</span>
+        <h2>Vier principes waar we niet van afwijken</h2>
+        <p>
+          Ze klinken vanzelfsprekend, maar ze bepalen in de praktijk waar we wél en niet
+          op ingaan.
+        </p>
+      </div>
+      <div class="grid grid--2">
+        {
+          principes.map((p) => (
+            <article class="kaart">
+              <h3>{p.titel}</h3>
+              <p>{p.tekst}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="sectie">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Gegevensbescherming</span>
+        <h2>Werken met gevoelige gegevens</h2>
+        <p>
+          Ziekenhuisdata zijn gezondheidsgegevens. Dat bepaalt hoe we werken, vanaf het
+          eerste gesprek en niet pas bij de eerste levering.
+        </p>
+      </div>
+      <dl class="deflijst deflijst--breed">
+        {
+          gegevensafspraken.map((g) => (
+            <div>
+              <dt>{g.label}</dt>
+              <dd>{g.tekst}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  <section class="sectie sectie--zacht">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Team</span>
+        <h2>Wie u aan tafel krijgt</h2>
+      </div>
+      <div class="prose">
+        <p class="ph">
+          [[ Nog in te vullen: korte voorstelling van het team — achtergrond in
+          gezondheidszorg, informatica en statistiek, aantal medewerkers, eventueel
+          namen en functies van de mensen die de opdrachten uitvoeren. ]]
+        </p>
+        <p>
+          Bij elke opdracht is er één vast aanspreekpunt dat de analyse ook zelf uitvoert.
+          U bespreekt de resultaten dus met wie de cijfers gemaakt heeft, niet met een
+          tussenpersoon.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <CTA
+    titel="Benieuwd of dit bij uw vraag past?"
+    tekst="Een kennismakingsgesprek verplicht tot niets en levert doorgaans al een eerste inschatting op van wat uw gegevens kunnen beantwoorden."
+  />
+</Base>
+
+<style>
+  .tweekolom {
+    display: grid;
+    gap: var(--s-7);
+    align-items: start;
+  }
+
+  @media (min-width: 980px) {
+    .tweekolom {
+      grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.7fr);
+      gap: var(--s-8);
+    }
+  }
+
+  .feiten {
+    border: var(--rand);
+    border-radius: var(--radius-lg);
+    padding: var(--s-5);
+    background: var(--c-bg-zacht);
+  }
+
+  .feiten dl {
+    display: grid;
+    gap: var(--s-4);
+    margin: 0;
+  }
+
+  .feiten dt {
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--c-tekst-gedempt);
+    margin-bottom: var(--s-1);
+  }
+
+  .feiten dd {
+    margin: 0;
+    font-weight: 600;
+    color: var(--c-primair);
+  }
+
+  @media (min-width: 800px) {
+    .deflijst--breed {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--s-5) var(--s-7);
+    }
+  }
+</style>

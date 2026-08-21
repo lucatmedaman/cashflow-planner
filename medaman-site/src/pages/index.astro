@@ -1,0 +1,235 @@
+---
+import Base from '../layouts/Base.astro';
+import DienstKaart from '../components/DienstKaart.astro';
+import DataVisual from '../components/DataVisual.astro';
+import CTA from '../components/CTA.astro';
+import { vertrouwenspunten, aanpak, waarom } from '../data/site';
+import { getCollection } from 'astro:content';
+
+const diensten = (await getCollection('diensten')).sort(
+  (a, b) => a.data.volgorde - b.data.volgorde,
+);
+---
+
+<Base
+  titel="Medaman · Healthcare data analytics voor ziekenhuizen"
+  kaleTitel
+  beschrijving="Medaman analyseert ziekenhuisdata voor Belgische ziekenhuizen: benchmarking, ICD-10-CM coding audits, APR-DRG- en NRG-analyses, verblijfsduur, PSI-indicatoren en klinische rapportage."
+>
+  <section class="hero">
+    <div class="container hero__raster">
+      <div class="hero__tekst">
+        <span class="eyebrow">Healthcare data analytics · Lokeren</span>
+        <h1>Inzicht in uw ziekenhuisdata — van codering tot casemix</h1>
+        <p class="lede">
+          Wij analyseren de registratie- en facturatiegegevens van Belgische ziekenhuizen
+          en vertalen ze naar bevindingen die stand houden: aan de directietafel, in de
+          medische raad en bij de coderingsdienst.
+        </p>
+        <div class="btn-rij">
+          <a class="btn btn--primair" href="/diensten/">Bekijk onze diensten</a>
+          <a class="btn btn--secundair" href="/contact/">Neem contact op</a>
+        </div>
+      </div>
+      <div class="hero__visual" aria-hidden="true">
+        <DataVisual />
+      </div>
+    </div>
+  </section>
+
+  <section class="sectie sectie--zacht">
+    <div class="container">
+      <ul class="punten">
+        {
+          vertrouwenspunten.map((p) => (
+            <li>
+              <h2>{p.titel}</h2>
+              <p>{p.tekst}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="sectie">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Diensten</span>
+        <h2>Zes domeinen, één gemeenschappelijke basis</h2>
+        <p class="lede">
+          Elke opdracht vertrekt van dezelfde bronnen — uw eigen registratie — en van
+          dezelfde eis: elk cijfer moet navolgbaar zijn tot op het dossier.
+        </p>
+      </div>
+      <div class="grid grid--3">
+        {
+          diensten.map((d) => (
+            <DienstKaart
+              href={`/diensten/${d.id}/`}
+              titel={d.data.titel}
+              kort={d.data.kort}
+              doelgroepen={d.data.doelgroepen}
+            />
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="sectie sectie--zacht">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Aanpak</span>
+        <h2>Drie stappen, geen verrassingen achteraf</h2>
+      </div>
+      <ol class="stappen">
+        {
+          aanpak.map((s) => (
+            <li>
+              <span class="stappen__nr" aria-hidden="true">
+                {s.nummer}
+              </span>
+              <h3>{s.titel}</h3>
+              <p>{s.tekst}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="sectie">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Waarom Medaman</span>
+        <h2>Analyse die de toets van de vakgroep doorstaat</h2>
+      </div>
+      <div class="grid grid--3">
+        {
+          waarom.map((w) => (
+            <article class="kaart">
+              <h3>{w.titel}</h3>
+              <p>{w.tekst}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <CTA />
+</Base>
+
+<style>
+  .hero {
+    padding-block: clamp(var(--s-7), 5vw, var(--s-9));
+    background:
+      linear-gradient(180deg, #fbfcfd 0%, #ffffff 100%);
+    border-bottom: var(--rand);
+  }
+
+  .hero__raster {
+    display: grid;
+    gap: var(--s-7);
+    align-items: center;
+  }
+
+  @media (min-width: 940px) {
+    .hero__raster {
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+  }
+
+  .hero__tekst > * + * {
+    margin-top: var(--s-5);
+  }
+
+  .hero__tekst h1 {
+    max-width: 19ch;
+  }
+
+  .hero__visual {
+    color: var(--c-primair);
+    border: var(--rand);
+    border-radius: var(--radius-lg);
+    background: var(--c-bg);
+    padding: var(--s-6);
+  }
+
+  .punten {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-5);
+  }
+
+  @media (min-width: 640px) {
+    .punten {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1040px) {
+    .punten {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .punten li {
+    border-top: 2px solid var(--c-accent);
+    padding-top: var(--s-4);
+  }
+
+  .punten h2 {
+    font-size: 1.02rem;
+    margin-bottom: var(--s-2);
+  }
+
+  .punten p {
+    color: var(--c-tekst-gedempt);
+    font-size: 0.94rem;
+  }
+
+  .stappen {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s-5);
+    counter-reset: stap;
+  }
+
+  @media (min-width: 900px) {
+    .stappen {
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--s-6);
+    }
+  }
+
+  .stappen li {
+    background: var(--c-bg);
+    border: var(--rand);
+    border-radius: var(--radius-lg);
+    padding: var(--s-5);
+  }
+
+  .stappen__nr {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--c-accent);
+    margin-bottom: var(--s-3);
+  }
+
+  .stappen h3 {
+    margin-bottom: var(--s-2);
+  }
+
+  .stappen p {
+    color: var(--c-tekst-gedempt);
+    font-size: 0.95rem;
+  }
+</style>

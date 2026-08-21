@@ -1,0 +1,212 @@
+---
+import Logo from './Logo.astro';
+import { site } from '../data/site';
+
+const pad = Astro.url.pathname;
+const actief = (href: string) => pad === href || (href !== '/' && pad.startsWith(href));
+---
+
+<header class="kop">
+  <div class="kop__banner">
+    <div class="container">{site.testBanner}</div>
+  </div>
+  <div class="container kop__balk">
+    <a href="/" class="kop__logo" aria-label={`${site.naam} — naar de startpagina`}>
+      <Logo />
+    </a>
+
+    <button
+      class="kop__schakelaar"
+      type="button"
+      aria-expanded="false"
+      aria-controls="hoofdmenu"
+      data-menu-knop
+    >
+      <span class="visueel-verborgen">Menu openen</span>
+      <span class="kop__streepjes" aria-hidden="true"></span>
+    </button>
+
+    <nav id="hoofdmenu" class="kop__nav" aria-label="Hoofdnavigatie" data-menu>
+      <ul>
+        {
+          site.navigatie.map((item) => (
+            <li>
+              <a href={item.href} aria-current={actief(item.href) ? 'page' : undefined}>
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+        <li class="kop__nav-cta">
+          <a class="btn btn--primair" href="/contact/">Gesprek aanvragen</a>
+        </li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<script>
+  const knop = document.querySelector<HTMLButtonElement>('[data-menu-knop]');
+  const menu = document.querySelector<HTMLElement>('[data-menu]');
+
+  knop?.addEventListener('click', () => {
+    const open = knop.getAttribute('aria-expanded') === 'true';
+    knop.setAttribute('aria-expanded', String(!open));
+    menu?.classList.toggle('kop__nav--open', !open);
+    knop.querySelector('.visueel-verborgen')!.textContent = open
+      ? 'Menu openen'
+      : 'Menu sluiten';
+  });
+
+  // Sluit het menu bij Escape, zodat toetsenbordgebruikers niet vastzitten.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && knop?.getAttribute('aria-expanded') === 'true') {
+      knop.click();
+      knop.focus();
+    }
+  });
+</script>
+
+<style>
+  .kop {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--c-bg);
+    border-bottom: var(--rand);
+  }
+
+  .kop__banner {
+    background: var(--c-primair-diep);
+    color: var(--c-tekst-op-diep);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    padding-block: 0.35rem;
+    text-align: center;
+  }
+
+  .kop__balk {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-4);
+    min-height: 72px;
+  }
+
+  .kop__logo {
+    text-decoration: none;
+  }
+
+  .kop__nav ul {
+    display: flex;
+    align-items: center;
+    gap: var(--s-5);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .kop__nav a:not(.btn) {
+    color: var(--c-tekst);
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 550;
+    padding-block: var(--s-2);
+    border-bottom: 2px solid transparent;
+  }
+
+  .kop__nav a:not(.btn):hover {
+    color: var(--c-primair-licht);
+  }
+
+  .kop__nav a[aria-current='page'] {
+    color: var(--c-primair);
+    border-bottom-color: var(--c-accent);
+  }
+
+  .kop__schakelaar {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--c-rand-sterk);
+    border-radius: var(--radius);
+    width: 42px;
+    height: 40px;
+    cursor: pointer;
+    padding: 0;
+    place-items: center;
+  }
+
+  .kop__streepjes,
+  .kop__streepjes::before,
+  .kop__streepjes::after {
+    display: block;
+    width: 18px;
+    height: 2px;
+    background: var(--c-primair);
+    transition: transform 0.15s ease;
+  }
+
+  .kop__streepjes::before,
+  .kop__streepjes::after {
+    content: '';
+    position: absolute;
+  }
+
+  .kop__streepjes::before {
+    transform: translateY(-6px);
+  }
+
+  .kop__streepjes::after {
+    transform: translateY(6px);
+  }
+
+  @media (max-width: 900px) {
+    .kop__schakelaar {
+      display: grid;
+      position: relative;
+    }
+
+    .kop__nav {
+      display: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      background: var(--c-bg);
+      border-bottom: var(--rand);
+      box-shadow: 0 12px 24px rgba(19, 32, 41, 0.08);
+    }
+
+    .kop__nav--open {
+      display: block;
+    }
+
+    .kop__nav ul {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0;
+      padding: var(--s-3) var(--s-4) var(--s-5);
+      max-width: var(--breedte);
+      margin-inline: auto;
+    }
+
+    .kop__nav li {
+      border-bottom: var(--rand);
+    }
+
+    .kop__nav a:not(.btn) {
+      display: block;
+      padding: var(--s-4) 0;
+    }
+
+    .kop__nav-cta {
+      border-bottom: 0;
+      padding-top: var(--s-4);
+    }
+
+    .kop__nav-cta .btn {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+</style>

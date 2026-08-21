@@ -1,0 +1,41 @@
+---
+interface Props {
+  /** 'licht' voor gebruik op een donkere achtergrond. */
+  variant?: 'donker' | 'licht';
+}
+const { variant = 'donker' } = Astro.props;
+const woord = variant === 'licht' ? '#ffffff' : '#0f3d5c';
+const staaf1 = variant === 'licht' ? 'rgba(255,255,255,0.5)' : '#7FB2CE';
+const staaf2 = variant === 'licht' ? 'rgba(255,255,255,0.75)' : '#4E8CAE';
+---
+
+<span class="logo">
+  <svg
+    class="logo__mark"
+    viewBox="0 0 32 32"
+    width="30"
+    height="30"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <rect x="3" y="17" width="5" height="10" rx="1" fill={staaf1} />
+    <rect x="11" y="11" width="5" height="16" rx="1" fill={staaf2} />
+    <rect x="19" y="5" width="5" height="22" rx="1" fill="#0e8f7e" />
+  </svg>
+  <span class="logo__woord" style={`color:${woord}`}>Medaman</span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1.32rem;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .logo__mark {
+    flex: none;
+  }
+</style>

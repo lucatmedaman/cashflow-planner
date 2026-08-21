@@ -1,0 +1,74 @@
+---
+/**
+ * Abstract data-motief voor de hero. Puur decoratief: geen echte cijfers,
+ * dus expliciet verborgen voor schermlezers.
+ */
+const staven = [38, 52, 46, 68, 61, 79, 72, 88];
+const lijn = [64, 58, 61, 47, 44, 36, 33, 26];
+const breedte = 400;
+const hoogte = 240;
+const stap = breedte / staven.length;
+const punten = lijn
+  .map((v, i) => `${(i * stap + stap / 2).toFixed(1)},${((v / 100) * hoogte).toFixed(1)}`)
+  .join(' ');
+---
+
+<svg
+  class="visual"
+  viewBox={`0 0 ${breedte} ${hoogte}`}
+  role="presentation"
+  aria-hidden="true"
+  focusable="false"
+>
+  {
+    [0.25, 0.5, 0.75].map((y) => (
+      <line
+        x1="0"
+        x2={breedte}
+        y1={hoogte * y}
+        y2={hoogte * y}
+        stroke="currentColor"
+        stroke-width="1"
+        opacity="0.14"
+      />
+    ))
+  }
+  {
+    staven.map((v, i) => (
+      <rect
+        x={i * stap + stap * 0.22}
+        y={hoogte - (v / 100) * hoogte}
+        width={stap * 0.56}
+        height={(v / 100) * hoogte}
+        rx="1.5"
+        fill="currentColor"
+        opacity={0.18 + i * 0.045}
+      />
+    ))
+  }
+  <polyline
+    points={punten}
+    fill="none"
+    stroke="#2fb3a0"
+    stroke-width="2.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  {
+    lijn.map((v, i) => (
+      <circle
+        cx={i * stap + stap / 2}
+        cy={(v / 100) * hoogte}
+        r="3.5"
+        fill="#2fb3a0"
+      />
+    ))
+  }
+</svg>
+
+<style>
+  .visual {
+    width: 100%;
+    height: auto;
+  }
+</style>

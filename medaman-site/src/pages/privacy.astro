@@ -1,0 +1,141 @@
+---
+import Base from '../layouts/Base.astro';
+import PaginaKop from '../components/PaginaKop.astro';
+import Placeholder from '../components/Placeholder.astro';
+import { site, isPlaceholder } from '../data/site';
+
+const c = site.contact;
+---
+
+<Base
+  titel="Privacyverklaring"
+  beschrijving="Hoe Medaman omgaat met de gegevens die via deze website worden doorgegeven."
+>
+  <PaginaKop
+    eyebrow="Juridisch"
+    titel="Privacyverklaring"
+    intro="Deze verklaring gaat over de gegevens die u via deze website doorgeeft. Voor gegevens die in het kader van een opdracht worden uitgewisseld, gelden de afspraken uit de verwerkersovereenkomst met het ziekenhuis."
+    kruimels={[{ label: 'Home', href: '/' }]}
+    huidig="Privacyverklaring"
+  />
+
+  <section class="sectie">
+    <div class="container">
+      <p class="waarschuwing">
+        <strong>Concepttekst.</strong> Deze verklaring hoort juridisch nagelezen te worden
+        vóór de site publiek gaat. Ze is opgesteld op basis van wat deze website
+        feitelijk doet, maar is geen juridisch advies.
+      </p>
+
+      <div class="prose juridisch">
+        <h2>Wie verwerkt uw gegevens?</h2>
+        <p>
+          {site.naam}, <Placeholder waarde={c.straat} />, <Placeholder waarde={c.postcode} />
+          {' '}{c.gemeente}, {c.land}. Ondernemingsnummer <Placeholder
+            waarde={c.ondernemingsnummer}
+          />. Contact: <Placeholder
+            waarde={c.email}
+            href={isPlaceholder(c.email) ? undefined : `mailto:${c.email}`}
+          />.
+        </p>
+
+        <h2>Welke gegevens en waarom?</h2>
+        <p>
+          Via het contactformulier verwerken we uw naam, organisatie, functie,
+          e-mailadres, eventueel telefoonnummer, het gekozen onderwerp en de inhoud van uw
+          bericht. We gebruiken die gegevens uitsluitend om uw vraag te beantwoorden en om
+          eventueel contact op te nemen over een mogelijke samenwerking.
+        </p>
+        <p>
+          Stuur via dit formulier geen patiëntgegevens of andere gezondheidsgegevens door.
+          Voor de uitwisseling van dergelijke gegevens gelden aparte afspraken en een
+          verwerkersovereenkomst.
+        </p>
+
+        <h2>Op welke grond?</h2>
+        <p>
+          De verwerking steunt op uw toestemming, die u geeft door het formulier te
+          versturen, en op ons gerechtvaardigd belang om op zakelijke vragen te kunnen
+          antwoorden.
+        </p>
+
+        <h2>Hoe lang bewaren we ze?</h2>
+        <p>
+          Correspondentie die niet tot een samenwerking leidt, bewaren we maximaal
+          <Placeholder waarde="[[ termijn, bv. twaalf maanden ]]" /> en verwijderen we
+          daarna. Leidt uw vraag tot een opdracht, dan gelden de bewaartermijnen uit de
+          overeenkomst.
+        </p>
+
+        <h2>Delen we ze met anderen?</h2>
+        <p>
+          We verkopen uw gegevens niet en gebruiken ze niet voor reclame. Ze worden enkel
+          verwerkt door onze eigen medewerkers en, waar van toepassing, door de
+          dienstverlener die onze e-mail en website host — steeds binnen de Europese
+          Economische Ruimte of onder passende waarborgen.
+        </p>
+
+        <h2>Cookies en meetgegevens</h2>
+        <p>
+          Deze website plaatst geen cookies voor analyse, advertenties of profilering, en
+          gebruikt geen externe trackingdiensten. Er worden geen lettertypes of scripts van
+          externe servers geladen.
+        </p>
+
+        <h2>Uw rechten</h2>
+        <ul class="lijst">
+          <li>Inzage in de gegevens die we over u verwerken.</li>
+          <li>Verbetering van onjuiste gegevens.</li>
+          <li>Verwijdering van uw gegevens.</li>
+          <li>Beperking van of bezwaar tegen de verwerking.</li>
+          <li>Overdraagbaarheid van de gegevens die u zelf heeft aangeleverd.</li>
+          <li>Intrekking van uw toestemming, zonder gevolgen voor wat al verwerkt is.</li>
+        </ul>
+        <p>
+          U oefent die rechten uit via <Placeholder
+            waarde={c.email}
+            href={isPlaceholder(c.email) ? undefined : `mailto:${c.email}`}
+          />. Bent u niet tevreden over de afhandeling, dan kunt u klacht indienen bij de
+          Gegevensbeschermingsautoriteit, Drukpersstraat 35, 1000 Brussel.
+        </p>
+
+        <h2>Wijzigingen</h2>
+        <p>
+          Wijzigen we deze verklaring, dan passen we de datum hieronder aan. Bij ingrijpende
+          wijzigingen brengen we lopende contacten daarvan op de hoogte.
+        </p>
+        <p class="datum">
+          Laatst bijgewerkt: <Placeholder waarde="[[ datum van publicatie ]]" />
+        </p>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .waarschuwing {
+    max-width: var(--breedte-tekst);
+    margin-bottom: var(--s-6);
+    padding: var(--s-4);
+    border-left: 3px solid var(--c-accent);
+    background: var(--c-accent-zacht);
+    font-size: 0.93rem;
+    color: var(--c-tekst);
+  }
+
+  .juridisch h2 {
+    font-size: 1.16rem;
+    margin-top: var(--s-6);
+  }
+
+  .juridisch h2:first-child {
+    margin-top: 0;
+  }
+
+  .datum {
+    margin-top: var(--s-6);
+    padding-top: var(--s-4);
+    border-top: var(--rand);
+    font-size: 0.9rem;
+  }
+</style>

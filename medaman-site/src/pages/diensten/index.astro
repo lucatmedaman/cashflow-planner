@@ -1,0 +1,67 @@
+---
+import Base from '../../layouts/Base.astro';
+import PaginaKop from '../../components/PaginaKop.astro';
+import DienstKaart from '../../components/DienstKaart.astro';
+import CTA from '../../components/CTA.astro';
+import { getCollection } from 'astro:content';
+
+const diensten = (await getCollection('diensten')).sort(
+  (a, b) => a.data.volgorde - b.data.volgorde,
+);
+---
+
+<Base
+  titel="Diensten"
+  beschrijving="Hospital benchmarking, ICD-10-CM coding audits, APR-DRG- en NRG-analyses, verblijfsduuranalyse, PSI-indicatoren en klinische rapportage voor Belgische ziekenhuizen."
+>
+  <PaginaKop
+    eyebrow="Diensten"
+    titel="Wat we voor uw ziekenhuis kunnen analyseren"
+    intro="Zes diensten die elkaar aanvullen. Ze staan los te bestellen, maar delen dezelfde bronnen en dezelfde methodologische afspraken — waardoor bevindingen uit verschillende analyses onderling consistent blijven."
+    kruimels={[{ label: 'Home', href: '/' }]}
+    huidig="Diensten"
+  />
+
+  <section class="sectie">
+    <div class="container">
+      <div class="grid grid--3">
+        {
+          diensten.map((d) => (
+            <DienstKaart
+              href={`/diensten/${d.id}/`}
+              titel={d.data.titel}
+              kort={d.data.kort}
+              doelgroepen={d.data.doelgroepen}
+              niveau={2}
+            />
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="sectie sectie--zacht">
+    <div class="container">
+      <div class="sectie-kop">
+        <span class="eyebrow">Samenhang</span>
+        <h2>Waarom deze diensten bij elkaar horen</h2>
+      </div>
+      <div class="prose">
+        <p>
+          Coderingskwaliteit, casemix, ligduur en veiligheidsindicatoren zijn geen losse
+          onderwerpen. Ze komen alle vier voort uit dezelfde registratie, en een probleem
+          in die registratie duikt in alle vier tegelijk op.
+        </p>
+        <p>
+          Een benchmark die uw ziekenhuis ongunstig positioneert, kan daarom evengoed op
+          een coderingsafspraak wijzen als op de zorg zelf. Wie beide kanten bekijkt,
+          vermijdt dat er een verbetertraject wordt opgestart voor een probleem dat in de
+          codeerhandleiding zat — of omgekeerd, dat een reëel signaal wordt afgedaan als
+          registratieruis.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <CTA />
+</Base>

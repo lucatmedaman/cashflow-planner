@@ -1,0 +1,321 @@
+---
+import { formulier, site, isPlaceholder } from '../data/site';
+
+const gekoppeld = formulier.endpoint !== null || formulier.netlify;
+const mailtoBeschikbaar = !isPlaceholder(site.contact.email);
+---
+
+<form
+  class="formulier"
+  method="post"
+  action={formulier.endpoint ?? undefined}
+  data-netlify={formulier.netlify ? 'true' : undefined}
+  name="contact"
+  novalidate
+  data-gekoppeld={gekoppeld ? 'ja' : 'nee'}
+  data-email={mailtoBeschikbaar ? site.contact.email : ''}
+>
+  {formulier.netlify && <input type="hidden" name="form-name" value="contact" />}
+
+  {/* Honeypot: onzichtbaar voor mensen, aantrekkelijk voor bots. */}
+  <div class="honing" aria-hidden="true">
+    <label for="website">Vul dit veld niet in</label>
+    <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+  </div>
+
+  <div class="velden">
+    <p class="veld">
+      <label for="naam">Naam <span aria-hidden="true">*</span></label>
+      <input id="naam" name="naam" type="text" required autocomplete="name" />
+      <span class="fout" data-fout-voor="naam" hidden></span>
+    </p>
+
+    <p class="veld">
+      <label for="organisatie">Ziekenhuis of organisatie <span aria-hidden="true">*</span></label>
+      <input id="organisatie" name="organisatie" type="text" required autocomplete="organization" />
+      <span class="fout" data-fout-voor="organisatie" hidden></span>
+    </p>
+
+    <p class="veld">
+      <label for="functie">Functie</label>
+      <input id="functie" name="functie" type="text" autocomplete="organization-title" />
+    </p>
+
+    <p class="veld">
+      <label for="email">E-mailadres <span aria-hidden="true">*</span></label>
+      <input id="email" name="email" type="email" required autocomplete="email" />
+      <span class="fout" data-fout-voor="email" hidden></span>
+    </p>
+
+    <p class="veld">
+      <label for="telefoon">Telefoon <span class="optioneel">(optioneel)</span></label>
+      <input id="telefoon" name="telefoon" type="tel" autocomplete="tel" />
+    </p>
+
+    <p class="veld">
+      <label for="onderwerp">Onderwerp <span aria-hidden="true">*</span></label>
+      <select id="onderwerp" name="onderwerp" required>
+        <option value="">Maak een keuze</option>
+        {formulier.onderwerpen.map((o) => <option value={o}>{o}</option>)}
+      </select>
+      <span class="fout" data-fout-voor="onderwerp" hidden></span>
+    </p>
+
+    <p class="veld veld--breed">
+      <label for="bericht">Uw vraag <span aria-hidden="true">*</span></label>
+      <textarea id="bericht" name="bericht" rows="6" required minlength="10"></textarea>
+      <span class="hint">
+        Het helpt als u vermeldt over welke periode en welke gegevens het gaat.
+      </span>
+      <span class="fout" data-fout-voor="bericht" hidden></span>
+    </p>
+
+    <p class="veld veld--breed veld--akkoord">
+      <span class="akkoord">
+        <input id="akkoord" name="akkoord" type="checkbox" required />
+        <label for="akkoord">
+          Ik ga ermee akkoord dat mijn gegevens worden gebruikt om deze vraag te
+          beantwoorden, zoals beschreven in de <a href="/privacy/">privacyverklaring</a>.
+          <span aria-hidden="true">*</span>
+        </label>
+      </span>
+      <span class="fout" data-fout-voor="akkoord" hidden></span>
+    </p>
+  </div>
+
+  <p class="verplicht-uitleg"><span aria-hidden="true">*</span> Verplicht veld</p>
+
+  <button class="btn btn--primair" type="submit">Verstuur uw vraag</button>
+
+  <p class="melding" role="status" data-melding hidden></p>
+
+  {
+    !gekoppeld && (
+      <p class="niet-gekoppeld">
+        <strong>Let op:</strong> dit is een testversie. Het formulier is nog niet aan een
+        mailbox gekoppeld, dus verzenden komt voorlopig niet aan.
+        {mailtoBeschikbaar
+          ? ' Gebruik zolang het e-mailadres hierboven.'
+          : ' Zodra het e-mailadres is ingevuld, verschijnt het hierboven als alternatief.'}
+      </p>
+    )
+  }
+</form>
+
+<script>
+  const form = document.querySelector<HTMLFormElement>('.formulier');
+  if (form) {
+    const melding = form.querySelector<HTMLElement>('[data-melding]')!;
+    const gekoppeld = form.dataset.gekoppeld === 'ja';
+    const email = form.dataset.email;
+
+    const boodschap = (veld: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
+      if (veld.validity.valueMissing) {
+        return veld.type === 'checkbox'
+          ? 'Vink dit aan om verder te kunnen.'
+          : 'Dit veld is verplicht.';
+      }
+      if (veld.validity.typeMismatch) return 'Vul een geldig e-mailadres in.';
+      if (veld.validity.tooShort) return 'Graag iets meer toelichting.';
+      return 'Controleer dit veld.';
+    };
+
+    const toon = (veld: HTMLElement, tekst: string | null) => {
+      const doel = form.querySelector<HTMLElement>(`[data-fout-voor="${veld.id}"]`);
+      if (!doel) return;
+      doel.textContent = tekst ?? '';
+      doel.hidden = tekst === null;
+      veld.setAttribute('aria-invalid', tekst === null ? 'false' : 'true');
+      doel.id = `fout-${veld.id}`;
+      if (tekst) {
+        veld.setAttribute('aria-describedby', doel.id);
+      } else {
+        veld.removeAttribute('aria-describedby');
+      }
+    };
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      melding.hidden = true;
+
+      const velden = [...form.elements].filter(
+        (el): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
+          (el instanceof HTMLInputElement ||
+            el instanceof HTMLSelectElement ||
+            el instanceof HTMLTextAreaElement) &&
+          el.name !== 'website',
+      );
+
+      let eersteFout: HTMLElement | null = null;
+      for (const veld of velden) {
+        const geldig = veld.checkValidity();
+        toon(veld, geldig ? null : boodschap(veld));
+        if (!geldig && !eersteFout) eersteFout = veld;
+      }
+
+      if (eersteFout) {
+        eersteFout.focus();
+        eersteFout.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+
+      // Honeypot ingevuld: stil doen alsof alles goed ging.
+      const honing = form.querySelector<HTMLInputElement>('#website');
+      if (honing?.value) {
+        form.reset();
+        melding.textContent = 'Bedankt, uw bericht is verstuurd.';
+        melding.hidden = false;
+        return;
+      }
+
+      if (!gekoppeld) {
+        melding.className = 'melding melding--wacht';
+        melding.textContent = email
+          ? `Alles is correct ingevuld, maar het formulier is in deze testversie nog niet gekoppeld. Stuur uw vraag zolang naar ${email}.`
+          : 'Alles is correct ingevuld, maar het formulier is in deze testversie nog niet aan een mailbox gekoppeld.';
+        melding.hidden = false;
+        return;
+      }
+
+      form.submit();
+    });
+  }
+</script>
+
+<style>
+  .formulier {
+    max-width: 640px;
+  }
+
+  .honing {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  .velden {
+    display: grid;
+    gap: var(--s-5);
+  }
+
+  @media (min-width: 640px) {
+    .velden {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .veld--breed {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .veld {
+    display: grid;
+    gap: var(--s-2);
+    margin: 0;
+  }
+
+  label {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--c-primair);
+  }
+
+  .optioneel {
+    font-weight: 400;
+    color: var(--c-tekst-gedempt);
+  }
+
+  input[type='text'],
+  input[type='email'],
+  input[type='tel'],
+  select,
+  textarea {
+    font: inherit;
+    font-size: 0.97rem;
+    color: var(--c-tekst);
+    background: var(--c-bg);
+    border: 1px solid var(--c-rand-sterk);
+    border-radius: var(--radius);
+    padding: 0.62rem 0.75rem;
+    width: 100%;
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 8rem;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+    border-color: var(--c-primair-licht);
+    box-shadow: var(--focus);
+  }
+
+  [aria-invalid='true'] {
+    border-color: #b3261e;
+  }
+
+  .hint {
+    font-size: 0.85rem;
+    color: var(--c-tekst-gedempt);
+  }
+
+  .fout {
+    font-size: 0.87rem;
+    font-weight: 550;
+    color: #b3261e;
+  }
+
+  .akkoord {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-3);
+  }
+
+  .akkoord input {
+    margin-top: 0.3rem;
+    width: 1.05rem;
+    height: 1.05rem;
+    flex: none;
+    accent-color: var(--c-primair);
+  }
+
+  .akkoord label {
+    font-weight: 400;
+    color: var(--c-tekst-gedempt);
+    font-size: 0.92rem;
+    line-height: 1.55;
+  }
+
+  .verplicht-uitleg {
+    margin: var(--s-4) 0 var(--s-5);
+    font-size: 0.85rem;
+    color: var(--c-tekst-gedempt);
+  }
+
+  .melding {
+    margin-top: var(--s-4);
+    padding: var(--s-4);
+    border-radius: var(--radius);
+    border: 1px solid var(--c-rand);
+    background: var(--c-bg-zacht);
+    font-size: 0.93rem;
+  }
+
+  .melding--wacht {
+    border-color: var(--c-accent);
+    background: var(--c-accent-zacht);
+  }
+
+  .niet-gekoppeld {
+    margin-top: var(--s-5);
+    padding: var(--s-4);
+    border-left: 3px solid var(--c-accent);
+    background: var(--c-bg-zacht);
+    font-size: 0.9rem;
+    color: var(--c-tekst-gedempt);
+  }
+</style>
