@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* Ruimte voor de sticky header wanneer naar een anker gesprongen wordt. */
+    scroll-padding-top: 7rem;
+  }
+
+  body {
+    @apply bg-white font-sans text-tekst antialiased;
+  }
+
+  /* Zichtbare focus voor toetsenbordgebruikers, overal. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primair-licht ring-offset-2;
+  }
+}
+
+@layer components {
+  /* Markering van gegevens die nog ingevuld moeten worden. */
+  .placeholder {
+    @apply italic text-gedempt border-b border-dashed border-rand-sterk;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

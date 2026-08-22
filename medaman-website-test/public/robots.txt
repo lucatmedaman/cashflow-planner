@@ -1,0 +1,3 @@
+# TEST-site. Zolang dit een preview is, mag niets geindexeerd worden.
+User-agent: *
+Disallow: /
