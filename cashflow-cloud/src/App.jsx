@@ -5,13 +5,13 @@ import {
   Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText, ArrowUpDown
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
-import { TABLES, atListAll, atCreate, atUpdate, atDelete } from "./airtable";
+import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } from "./airtable";
 
 // ---------- constants ----------
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.21.0";
+const APP_VERSION = "2.22.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -414,6 +414,7 @@ function itemFromRecord(r) {
       try { return r.fields.VerborgenTotKoppeling ? JSON.parse(r.fields.VerborgenTotKoppeling) : []; }
       catch (e) { return []; }
     })(),
+    invoiceFiles: (r.fields.Factuurbestand || []).map((a) => ({ id: a.id, url: a.url, filename: a.filename })),
   };
 }
 function itemToFields(item) {
@@ -2294,6 +2295,7 @@ export default function CashflowPlanner() {
         entityId: activeEntity !== "all" ? activeEntity : "",
         fileName: file.name,
         source: "UBL",
+        rawText: String(reader.result || ""),
         ...parsed,
       });
       setUblError("");
@@ -2537,6 +2539,24 @@ export default function CashflowPlanner() {
     return best;
   }
 
+  // Zet een File-object of platte tekst om naar base64, voor het bewaren van
+  // het brondocument (UBL-XML of PDF) als Airtable-bijlage op de post.
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  function textToBase64(text) {
+    try {
+      return btoa(unescape(encodeURIComponent(text)));
+    } catch (e) {
+      return "";
+    }
+  }
+
   async function submitUblImport() {
     if (!ublDraft) return;
     if (!ublDraft.entityId) { setUblError("Kies eerst een boekhouding."); return; }
@@ -2600,6 +2620,25 @@ export default function CashflowPlanner() {
         setItems((prev) => [...prev, created]);
       }
       markSynced();
+
+      // Bewaart het brondocument (UBL-XML of PDF) als bijlage op de post —
+      // niet-blokkerend: als dit faalt, blijft de post zelf gewoon staan.
+      try {
+        if (ublDraft.source === "UBL" && ublDraft.rawText) {
+          const base64 = textToBase64(ublDraft.rawText);
+          if (base64) {
+            await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.xml", "application/xml", base64);
+          }
+        } else if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
+          const base64 = await fileToBase64(ublDraft.pdfFile);
+          if (base64) {
+            await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.pdf", "application/pdf", base64);
+          }
+        }
+      } catch (attachErr) {
+        console.error("Bijlage-upload mislukt (post blijft wel bestaan):", attachErr);
+      }
+
       logAction(
         ublDraft.source === "PDF" ? "PDF-inlezen" : "UBL-inlezen",
         ublDraft.entityId,
@@ -7890,6 +7929,23 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 Betaling voor déze occurrence koppelen/loskoppelen…
               </button>
             )}
+          </div>
+        )}
+
+        {type === "item" && (record.invoiceFiles || []).length > 0 && (
+          <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+            <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700 mb-1">Bewaarde factuur</p>
+            {record.invoiceFiles.map((f) => (
+              <a
+                key={f.id}
+                href={f.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-xs text-emerald-700 underline decoration-dotted truncate"
+              >
+                {f.filename || "Bekijk bestand"}
+              </a>
+            ))}
           </div>
         )}
 
