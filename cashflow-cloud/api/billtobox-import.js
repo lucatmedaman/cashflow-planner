@@ -19,6 +19,7 @@ const TABLES = {
   entities: "tblvCShG16EqO56N1",
   counterparties: "tblvZdFmsLq1zC1mp",
   items: "tblDNUpMUR9glpx4j",
+  attachmentField: "fldQd6IHxSQJVsm6y", // Posten.Factuurbestand
 };
 // Meerdere Billtobox-accounts kunnen naar dit ene endpoint posten — welke
 // boekhouding het wordt, hangt af van ?entity=... in de URL die je bij elke
@@ -333,6 +334,20 @@ export default async function handler(req, res) {
         res.status(502).json({ error: "Airtable weigerde de update van de herhalende post.", detail: updateData });
         return;
       }
+      try {
+        const safeInvoiceNumber = (invoiceNumber || "onbekend").replace(/[^a-zA-Z0-9_-]/g, "_");
+        await fetch(`https://content.airtable.com/v0/${BASE_ID}/${recurringMatch.id}/${TABLES.attachmentField}/uploadAttachment`, {
+          method: "POST",
+          headers: airtableHeaders(),
+          body: JSON.stringify({
+            contentType: "application/xml",
+            filename: `${safeInvoiceNumber}.xml`,
+            file: Buffer.from(xml, "utf8").toString("base64"),
+          }),
+        });
+      } catch (attachErr) {
+        console.error("billtobox-import: bijlage-upload (herhalende post) mislukt:", attachErr);
+      }
       res.status(200).json({
         status: "ok",
         note: "Bestaande herhalende post bijgewerkt — geen nieuwe post aangemaakt.",
@@ -376,6 +391,24 @@ export default async function handler(req, res) {
       await logFailureToAirtable("Airtable weigerde post", JSON.stringify(createData).slice(0, 800), targetEntityId, `factuur ${invoiceNumber}, ${supplierName}, €${amount}`);
       res.status(502).json({ error: "Airtable weigerde de nieuwe post.", detail: createData });
       return;
+    }
+
+    // Bewaart de originele UBL-factuur als bijlage op de post, zodat het
+    // brondocument later nog te raadplegen is — niet-blokkerend: als dit
+    // faalt, blijft de post zelf gewoon staan, enkel de bijlage ontbreekt.
+    try {
+      const safeInvoiceNumber = (invoiceNumber || "onbekend").replace(/[^a-zA-Z0-9_-]/g, "_");
+      await fetch(`https://content.airtable.com/v0/${BASE_ID}/${createData.records[0].id}/${TABLES.attachmentField}/uploadAttachment`, {
+        method: "POST",
+        headers: airtableHeaders(),
+        body: JSON.stringify({
+          contentType: "application/xml",
+          filename: `${safeInvoiceNumber}.xml`,
+          file: Buffer.from(xml, "utf8").toString("base64"),
+        }),
+      });
+    } catch (attachErr) {
+      console.error("billtobox-import: bijlage-upload mislukt (post blijft wel bestaan):", attachErr);
     }
 
     res.status(200).json({
