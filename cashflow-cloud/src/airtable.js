@@ -80,6 +80,15 @@ export async function atUpdate(tableId, records) {
   return out;
 }
 
+export async function atUploadAttachment(recordId, fieldId, filename, contentType, base64) {
+  const res = await fetch("/api/upload-attachment", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({ recordId, fieldId, filename, contentType, file: base64 }),
+  });
+  return handle(res, "bijlage uploaden");
+}
+
 export async function atDelete(tableId, ids) {
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
