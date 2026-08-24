@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.22.0";
+const APP_VERSION = "2.23.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -325,6 +325,7 @@ function counterpartyFromRecord(r) {
     defaultAccountId: (r.fields.StandaardBetaalrekening || [])[0] || null,
     isDomiciliering: !!r.fields.Domiciliering,
     isDoorlopendeOpdracht: !!r.fields.DoorlopendeOpdracht,
+    viaPayPalDefault: !!r.fields.StandaardViaPayPal,
   };
 }
 
@@ -2859,7 +2860,8 @@ export default function CashflowPlanner() {
     }
   }
   async function updateCounterpartyPaymentFlag(id, key, value) {
-    const airtableField = key === "isDomiciliering" ? "Domiciliering" : "DoorlopendeOpdracht";
+    const airtableField =
+      key === "isDomiciliering" ? "Domiciliering" : key === "isDoorlopendeOpdracht" ? "DoorlopendeOpdracht" : "StandaardViaPayPal";
     setCounterparties((prev) => prev.map((c) => (c.id === id ? { ...c, [key]: value } : c)));
     try {
       await atUpdate(TABLES.counterparties, [{ id, fields: { [airtableField]: value } }]);
@@ -5058,6 +5060,22 @@ function ItemForm({ form, setForm, entities, counterparties, onSubmit, onCancel,
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-slate-400 resize-none"
       />
 
+      {(() => {
+        const matchedCp = counterparties.find(
+          (c) => c.name.trim().toLowerCase() === form.counterparty.trim().toLowerCase()
+        );
+        if (!matchedCp?.viaPayPalDefault || form.viaPaypal) return null;
+        return (
+          <button
+            type="button"
+            onClick={() => setForm({ ...form, viaPaypal: true })}
+            className="w-full text-left text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100"
+          >
+            {matchedCp.name} wordt standaard via PayPal betaald — klik om aan te vinken
+          </button>
+        );
+      })()}
+
       <label className="flex items-center gap-2 text-sm text-slate-600">
         <input
           type="checkbox"
@@ -6910,6 +6928,15 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         />
                         Doorlopende opdracht
                       </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.viaPayPalDefault}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "viaPayPalDefault", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Via PayPal
+                      </label>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
                       <input
@@ -7281,6 +7308,15 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                           className="w-4 h-4 rounded border-slate-300"
                         />
                         Doorlopende opdracht
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!counterparty.viaPayPalDefault}
+                          onChange={(e) => onUpdatePaymentFlag(counterparty.id, "viaPayPalDefault", e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        Via PayPal
                       </label>
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600 pt-1">
