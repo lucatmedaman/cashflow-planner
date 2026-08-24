@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.23.1";
+const APP_VERSION = "2.24.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -8326,6 +8326,26 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   const [bulkCounterparty, setBulkCounterparty] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  // Rij-per-rij toewijzing: sneller dan bulk-selecteren wanneer elke
+  // ongekoppelde betaling een andere crediteur nodig heeft.
+  const [inlineAssignInputs, setInlineAssignInputs] = useState({}); // paymentId -> tekst
+  const [inlineAssigning, setInlineAssigning] = useState(null); // paymentId in behandeling
+  async function assignInline(payment) {
+    const name = (inlineAssignInputs[payment.id] || "").trim();
+    if (!name) return;
+    setInlineAssigning(payment.id);
+    try {
+      const counterpartyId = await onResolveCounterparty(name);
+      await onBulkAssignCounterparty([payment.id], counterpartyId);
+      setInlineAssignInputs((prev) => {
+        const next = { ...prev };
+        delete next[payment.id];
+        return next;
+      });
+    } finally {
+      setInlineAssigning(null);
+    }
+  }
   // Zelfde instelbare-sortering-patroon als "Ongekoppelde documenten"/
   // "Ongekoppelde betalingen" in Koppelen — was hier voorheen een vaste
   // datum+volgnummer-combinatie, nu net als daar zelf te kiezen.
@@ -8622,6 +8642,26 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
                     </span>
                   </div>
                 </div>
+                {!p.counterpartyId && (
+                  <div onClick={(e) => e.stopPropagation()} className="mt-1.5 ml-[26px] flex items-center gap-1.5">
+                    <CounterpartyAutocomplete
+                      value={inlineAssignInputs[p.id] || ""}
+                      onChange={(v) => setInlineAssignInputs((prev) => ({ ...prev, [p.id]: v }))}
+                      onKeyDown={(e) => e.key === "Enter" && assignInline(p)}
+                      counterparties={counterparties || []}
+                      placeholder="Debiteur/crediteur toewijzen…"
+                      className="flex-1 min-w-0"
+                      inputClassName="w-full border border-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-slate-400"
+                    />
+                    <button
+                      onClick={() => assignInline(p)}
+                      disabled={inlineAssigning === p.id || !(inlineAssignInputs[p.id] || "").trim()}
+                      className="text-[10px] bg-slate-900 text-white rounded px-2 py-1 shrink-0 disabled:opacity-40"
+                    >
+                      {inlineAssigning === p.id ? "…" : "toewijs"}
+                    </button>
+                  </div>
+                )}
                 {mergingFor === p.id && (
                   <div onClick={(e) => e.stopPropagation()} className="mt-2 ml-[26px] p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
                     <p className="text-[11px] text-slate-500">
