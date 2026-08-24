@@ -114,8 +114,11 @@ def sleutelvelden(tekst: str, code: str) -> set[int]:
     laatste = {int(m.group(2)): i for i, m in enumerate(koppen)}  # body komt na de inhoudstafels
     uit = set()
     for nr, i in laatste.items():
-        eind = koppen[i + 1].start() if i + 1 < len(koppen) else koppen[i].end() + 900
-        if re.search(rf'\b{code}\s*-\s*Sleutelveld', tekst[koppen[i].end():eind], re.I):
+        # vanaf de kop zelf lezen: VELDKOP neemt ook de vervolgregels van de
+        # omschrijving mee, en de vermelding 'Sleutelveld' staat daar vlak onder
+        begin = koppen[i].start()
+        eind = koppen[i + 1].start() if i + 1 < len(koppen) else begin + 900
+        if re.search(rf'\b{code}\s*-\s*Sleutelveld', tekst[begin:eind], re.I):
             uit.add(nr)
     return uit
 
@@ -279,14 +282,20 @@ def main(argv=None) -> int:
 
     zonder_type = [f"{c}.{v['nr']}" for c, d in gesorteerd.items()
                    for v in d['velden'] if not v['datatype']]
+    # elk MZG-bestand heeft sleutelvelden; geen enkele betekent dat de
+    # herkenning in de PDF-tekst stukgelopen is
+    zonder_sleutel = [c for c, d in gesorteerd.items()
+                      if not any(v['sleutelveld'] for v in d['velden'])]
     print(f"{len(gesorteerd)} bestanden, "
           f"{sum(len(d['velden']) for d in gesorteerd.values())} velden -> {opties.output}")
     if zonder_type:
         print(f"LET OP: geen datatype gevonden voor {zonder_type}", file=sys.stderr)
+    if zonder_sleutel:
+        print(f"LET OP: geen sleutelvelden gevonden voor {zonder_sleutel}", file=sys.stderr)
     print('\ncontrole tegen de voorbeeldregistraties in de PDF\'s:')
     for melding in controleer(teksten, gesorteerd):
         print('  ' + melding)
-    return 1 if zonder_type else 0
+    return 1 if (zonder_type or zonder_sleutel) else 0
 
 
 if __name__ == '__main__':

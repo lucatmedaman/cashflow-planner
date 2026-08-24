@@ -18,7 +18,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -31,7 +31,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -44,7 +44,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -57,7 +57,7 @@
      "lengte": "1-20",
      "min_lengte": 1,
      "max_lengte": 20,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -92,7 +92,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -105,7 +105,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -118,7 +118,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -131,7 +131,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -517,7 +517,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -530,7 +530,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -543,7 +543,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -556,7 +556,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -643,7 +643,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -656,7 +656,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -669,7 +669,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -682,7 +682,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -847,7 +847,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2 S3"
     },
     {
@@ -860,7 +860,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2 S3"
     },
     {
@@ -873,7 +873,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2 S3"
     },
     {
@@ -886,7 +886,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1012,7 +1012,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1025,7 +1025,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1038,7 +1038,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1051,7 +1051,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1064,7 +1064,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1112,7 +1112,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -1125,7 +1125,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -1138,7 +1138,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -1151,7 +1151,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1164,7 +1164,7 @@
      "lengte": "3-6",
      "min_lengte": 3,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1199,7 +1199,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1212,7 +1212,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1225,7 +1225,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1238,7 +1238,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1251,7 +1251,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1264,7 +1264,7 @@
      "lengte": "6",
      "min_lengte": 6,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1277,7 +1277,7 @@
      "lengte": "8",
      "min_lengte": 8,
      "max_lengte": 8,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1364,7 +1364,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1377,7 +1377,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1390,7 +1390,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1403,7 +1403,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1416,7 +1416,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1429,7 +1429,7 @@
      "lengte": "6",
      "min_lengte": 6,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1442,7 +1442,7 @@
      "lengte": "8",
      "min_lengte": 8,
      "max_lengte": 8,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1468,7 +1468,7 @@
      "lengte": "1 of 7",
      "min_lengte": 1,
      "max_lengte": 7,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1542,7 +1542,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1555,7 +1555,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1568,7 +1568,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1581,7 +1581,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -1594,7 +1594,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1607,7 +1607,7 @@
      "lengte": "6",
      "min_lengte": 6,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1620,7 +1620,7 @@
      "lengte": "8",
      "min_lengte": 8,
      "max_lengte": 8,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1707,7 +1707,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -1720,7 +1720,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -1733,7 +1733,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -1746,7 +1746,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -1759,7 +1759,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -1772,7 +1772,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1785,7 +1785,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1798,7 +1798,7 @@
      "lengte": "3-6 t.e.m. MZG2014 3-7 vanaf MZG2015",
      "min_lengte": 3,
      "max_lengte": 7,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1846,7 +1846,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1859,7 +1859,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1872,7 +1872,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1885,7 +1885,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1898,7 +1898,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1911,7 +1911,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1924,7 +1924,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1937,7 +1937,7 @@
      "lengte": "3-6 t.e.m. MZG2014 3-7 vanaf MZG2015",
      "min_lengte": 3,
      "max_lengte": 7,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "M1"
     },
     {
@@ -1950,7 +1950,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1963,7 +1963,7 @@
      "lengte": "2-4 t.e.m. MZG2014 M F C 7 vanaf MZG2015",
      "min_lengte": 2,
      "max_lengte": 7,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1976,7 +1976,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -1989,7 +1989,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2002,7 +2002,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2089,7 +2089,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A4"
     },
     {
@@ -2102,7 +2102,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A4"
     },
     {
@@ -2115,7 +2115,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A4"
     },
     {
@@ -2128,7 +2128,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A4"
     },
     {
@@ -2141,7 +2141,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A4"
     },
     {
@@ -2154,7 +2154,7 @@
      "lengte": "6",
      "min_lengte": 6,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2167,7 +2167,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2180,7 +2180,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2193,7 +2193,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2254,7 +2254,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -2267,7 +2267,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -2280,7 +2280,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -2293,7 +2293,7 @@
      "lengte": "1-20",
      "min_lengte": 1,
      "max_lengte": 20,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A1"
     },
     {
@@ -2497,7 +2497,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -2510,7 +2510,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -2523,7 +2523,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -2536,7 +2536,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     },
     {
@@ -2549,7 +2549,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2562,7 +2562,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2575,7 +2575,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2588,7 +2588,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2601,7 +2601,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2636,7 +2636,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -2649,7 +2649,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -2662,7 +2662,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -2675,7 +2675,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -2688,7 +2688,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A3"
     },
     {
@@ -2701,7 +2701,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2714,7 +2714,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     }
    ]
@@ -2736,7 +2736,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2749,7 +2749,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2762,7 +2762,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2775,7 +2775,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2788,7 +2788,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2801,7 +2801,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2814,7 +2814,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2888,7 +2888,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2901,7 +2901,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2914,7 +2914,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2927,7 +2927,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2940,7 +2940,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -2953,7 +2953,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2966,7 +2966,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2979,7 +2979,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -2992,7 +2992,7 @@
      "lengte": "6",
      "min_lengte": 6,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3005,7 +3005,7 @@
      "lengte": "1",
      "min_lengte": 1,
      "max_lengte": 1,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3053,7 +3053,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3066,7 +3066,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3079,7 +3079,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3179,7 +3179,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3192,7 +3192,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3205,7 +3205,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3218,7 +3218,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3318,7 +3318,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S2"
     },
     {
@@ -3331,7 +3331,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S2"
     },
     {
@@ -3344,7 +3344,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S2"
     },
     {
@@ -3357,7 +3357,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S2"
     },
     {
@@ -3370,7 +3370,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3470,7 +3470,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -3483,7 +3483,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -3496,7 +3496,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -3509,7 +3509,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -3522,7 +3522,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S3"
     },
     {
@@ -3535,7 +3535,7 @@
      "lengte": "1-6",
      "min_lengte": 1,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3561,7 +3561,7 @@
      "lengte": "2-10",
      "min_lengte": 2,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     }
    ]
@@ -3583,7 +3583,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3596,7 +3596,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3609,7 +3609,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S1"
     },
     {
@@ -3622,7 +3622,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3635,7 +3635,7 @@
      "lengte": "5",
      "min_lengte": 5,
      "max_lengte": 5,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     },
     {
@@ -3787,7 +3787,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 A2"
     },
     {
@@ -3800,7 +3800,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 A2"
     },
     {
@@ -3813,7 +3813,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 A2"
     },
     {
@@ -3826,7 +3826,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3839,7 +3839,7 @@
      "lengte": "5",
      "min_lengte": 5,
      "max_lengte": 5,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3852,7 +3852,7 @@
      "lengte": "1-15",
      "min_lengte": 1,
      "max_lengte": 15,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "A2"
     }
    ]
@@ -3874,7 +3874,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3887,7 +3887,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3900,7 +3900,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3913,7 +3913,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3926,7 +3926,7 @@
      "lengte": "5",
      "min_lengte": 5,
      "max_lengte": 5,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -3939,7 +3939,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": null
     }
    ]
@@ -3961,7 +3961,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 S4"
     },
     {
@@ -3974,7 +3974,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 S4"
     },
     {
@@ -3987,7 +3987,7 @@
      "lengte": "1-2",
      "min_lengte": 1,
      "max_lengte": 2,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5 S4"
     },
     {
@@ -4000,7 +4000,7 @@
      "lengte": "3",
      "min_lengte": 3,
      "max_lengte": 3,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -4013,7 +4013,7 @@
      "lengte": "5",
      "min_lengte": 5,
      "max_lengte": 5,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S5"
     },
     {
@@ -4026,7 +4026,7 @@
      "lengte": "4",
      "min_lengte": 4,
      "max_lengte": 4,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S4"
     },
     {
@@ -4039,7 +4039,7 @@
      "lengte": "4-10",
      "min_lengte": 4,
      "max_lengte": 10,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S4"
     },
     {
@@ -4052,7 +4052,7 @@
      "lengte": "1-6",
      "min_lengte": 1,
      "max_lengte": 6,
-     "sleutelveld": false,
+     "sleutelveld": true,
      "foreign_key": "S4"
     }
    ]

@@ -1,4 +1,2 @@
-# inlezen en wegschrijven van Parquet (files_to_parquet.py, mzg_to_parquet.py)
+# inlezen en wegschrijven van Parquet
 pyarrow>=15
-# enkel nodig om mzg_schema.json opnieuw af te leiden uit de richtlijnen-PDF's
-pypdf>=4
