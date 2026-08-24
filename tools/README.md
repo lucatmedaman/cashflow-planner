@@ -23,4 +23,4 @@ inhoud van bv. `.env` in het Parquet-bestand terecht.
 ---
 
 De MZG/RHM-tooling die hier eerst stond, is een aparte applicatie geworden:
-zie `mzg-parquet/` (of de losse repo, zodra die afgesplitst is).
+https://github.com/lucatmedaman/mzg-parquet
