@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.23.0";
+const APP_VERSION = "2.23.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3599,7 +3599,7 @@ export default function CashflowPlanner() {
               <ChevronDown className={`w-4 h-4 text-[#93999F] transition-transform ${showEntityMenu ? "rotate-180" : ""}`} />
             </button>
             {showEntityMenu && (
-              <div className="absolute z-50 mt-1.5 left-0 w-64 max-h-80 overflow-y-auto bg-white border border-[#E3E7E4] rounded-xl shadow-lg py-1">
+              <div className="absolute z-[9999] mt-1.5 left-0 w-64 max-h-80 overflow-y-auto bg-white border border-[#E3E7E4] rounded-xl shadow-lg py-1">
                 <button
                   onClick={() => { setActiveEntity("all"); setShowEntityMenu(false); }}
                   className={`w-full text-left px-4 py-2 text-sm ${activeEntity === "all" ? "bg-[#12181F] text-[#F4F6F5]" : "text-[#12181F] hover:bg-slate-50"}`}
