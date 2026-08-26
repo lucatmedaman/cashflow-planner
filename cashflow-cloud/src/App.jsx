@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.24.0";
+const APP_VERSION = "2.25.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -172,27 +172,45 @@ function occurrencePaymentMap(item, paymentsById) {
   // haar dichtstbijzijnde occurrence — ongeacht hoe ver de datum afwijkt.
   // Tolerantie speelt enkel nog een rol bij het automatisch zoeken naar een
   // geschikte occurrence om aan te koppelen (elders, bv. bank-import matching).
-  //
-  // pinnedOccurrence heeft voorrang op de datum-nabijheid-berekening: een
-  // laattijdige betaling die toevallig dichter bij een ándere occurrence ligt
-  // dan bij de bedoelde, zou anders fout toegewezen worden (bv. een betaling
-  // van 14/08 voor de factuur van 21/07 ligt dichter bij 21/08).
-  for (const p of linked) {
-    if (p.pinnedOccurrence) {
-      const existing = map.get(p.pinnedOccurrence);
-      if (!existing || p.date >= existing.date) map.set(p.pinnedOccurrence, p);
-      continue;
-    }
+  const pinned = linked.filter((p) => p.pinnedOccurrence);
+  const unpinned = linked.filter((p) => !p.pinnedOccurrence);
+  for (const p of pinned) {
+    const existing = map.get(p.pinnedOccurrence);
+    if (!existing || p.date >= existing.date) map.set(p.pinnedOccurrence, p);
+  }
+
+  // Voor de niet-gepinde Betalingen: een globale beste-match-eerst toewijzing
+  // i.p.v. elke Betaling onafhankelijk haar eigen dichtstbijzijnde occurrence
+  // te laten kiezen. Dat laatste faalt zodra twee Betalingen (bv. twee
+  // opeenvolgende maanden) toevallig naar dezelfde occurrence neigen — de
+  // laatst-verwerkte "wint" dan altijd, ongeacht welke feitelijk beter past.
+  // Score combineert datum-afstand met bedrag-afstand (t.o.v. het huidige
+  // factuurbedrag van de post — bij een geleidelijk stijgend/dalend bedrag
+  // per maand is dat een bruikbare, zij het benaderende, hint), zodat een
+  // betaling met een sterk afwijkend bedrag niet zomaar de dichtstbijzijnde
+  // datum wint van een betaling die zowel qua datum als bedrag beter past.
+  const candidates = [];
+  for (const p of unpinned) {
     const pDate = fromISO(p.date);
     const windowStart = toISO(addDays(pDate, -400));
     const windowEnd = toISO(addDays(pDate, 400));
-    const occ = generateOccurrences(item, windowStart, windowEnd);
-    if (occ.length === 0) continue;
-    const nearest = occ.slice().sort(
-      (a, b) => Math.abs(fromISO(a.date) - pDate) - Math.abs(fromISO(b.date) - pDate)
-    )[0];
-    const existing = map.get(nearest.date);
-    if (!existing || p.date >= existing.date) map.set(nearest.date, p);
+    const occ = generateOccurrences(item, windowStart, windowEnd).filter((o) => !map.has(o.date));
+    for (const o of occ) {
+      const dateDistanceDays = Math.abs(fromISO(o.date) - pDate) / 86400000;
+      const amountDistanceRatio = item.amount > 0 ? Math.abs(p.amount - item.amount) / item.amount : 0;
+      // 1 dag datum-afstand weegt ongeveer even zwaar als 5% bedragsafwijking.
+      const score = dateDistanceDays + amountDistanceRatio * 20;
+      candidates.push({ payment: p, occurrenceDate: o.date, score });
+    }
+  }
+  candidates.sort((a, b) => a.score - b.score);
+  const assignedPayments = new Set();
+  const assignedOccurrences = new Set(map.keys());
+  for (const c of candidates) {
+    if (assignedPayments.has(c.payment.id) || assignedOccurrences.has(c.occurrenceDate)) continue;
+    map.set(c.occurrenceDate, c.payment);
+    assignedPayments.add(c.payment.id);
+    assignedOccurrences.add(c.occurrenceDate);
   }
   return map;
 }
