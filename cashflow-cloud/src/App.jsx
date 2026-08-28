@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.25.1";
+const APP_VERSION = "2.26.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -3147,6 +3147,38 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Aparte functie t.o.v. markOccurrencePaid: hier kan het bedrag afwijken
+  // van het factuurbedrag (contante betalingen zijn soms afgerond, gedeeltelijk,
+  // of anderszins net niet gelijk aan wat er op de post staat).
+  async function addCashPayment(itemId, date, amount) {
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    try {
+      const fields = paymentToFields({
+        description: item.description,
+        date,
+        amount,
+        direction: item.direction,
+        entityId: item.entityId,
+        source: "Cash-handmatig",
+        categoryId: item.categoryId,
+        projectId: item.projectId,
+        counterpartyId: item.counterpartyId,
+        documentIds: [itemId],
+        noDocumentNeeded: false,
+      });
+      const [rec] = await atCreate(TABLES.payments, [{ fields }]);
+      const created = paymentFromRecord(rec);
+      setPayments((prev) => [...prev, created]);
+      const newDocPaymentIds = [...(item.paymentIds || []), created.id];
+      await atUpdate(TABLES.items, [{ id: itemId, fields: { Betalingen: newDocPaymentIds } }]);
+      setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, paymentIds: newDocPaymentIds } : i)));
+      markSynced();
+    } catch (err) {
+      setAirtableError(err.message);
+    }
+  }
+
   async function markOccurrencePaid(itemId, date) {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
@@ -3788,7 +3820,7 @@ export default function CashflowPlanner() {
                           onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} />
+                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -3857,7 +3889,7 @@ export default function CashflowPlanner() {
                           onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
                           onCounterpartyClick={goToCounterparty}
                           payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} />
+                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
                         {editingId === r.itemId && (
                           <ItemForm
                             form={form}
@@ -4684,6 +4716,7 @@ export default function CashflowPlanner() {
           onOpenDetail={openDetail}
           onTogglePaid={markOccurrencePaid}
           onToggleHidden={toggleOccurrenceHidden}
+          onAddCashPayment={addCashPayment}
           onEditItem={(item) => { startEdit(item); setView("planning"); setDetailTarget(null); }}
           onDeleteItem={async (id) => { await deleteItem(id); setDetailTarget(null); }}
           onUnlinkPayment={unlinkPaymentFromDocument}
@@ -4717,10 +4750,14 @@ function SummaryCard({ label, value, tone, isCount }) {
   );
 }
 
-function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment, onOpenDetail, onToggleHidden }) {
+function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, onDuplicate, overdue, showDate, onCounterpartyClick, payments, onLinkPayment, onUnlinkPayment, onOpenDetail, onToggleHidden, onAddCashPayment }) {
   const c = entityColor(entity);
   const isIn = row.item.direction === "in";
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  const [cashFormOpen, setCashFormOpen] = useState(false);
+  const [cashAmount, setCashAmount] = useState(row.item.amount);
+  const [cashDate, setCashDate] = useState(row.date);
+  const [cashSaving, setCashSaving] = useState(false);
   const [chosenPaymentId, setChosenPaymentId] = useState("");
   const [linking, setLinking] = useState(false);
   const paymentsByIdLocal = useMemo(() => {
@@ -4867,6 +4904,15 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
             <Link2 className="w-3.5 h-3.5" />
           </button>
         )}
+        {paymentIds.length === 0 && !row.paid && onTogglePaid && (
+          <button
+            onClick={() => { setCashFormOpen((s) => !s); setCashAmount(row.item.amount); setCashDate(row.date); }}
+            className="p-1 text-[10px] text-[#C7CCC9] hover:text-[#12181F] underline decoration-dotted"
+            title="Contante betaling toevoegen — voor als er geen bankuittreksel voor komt"
+          >
+            cash
+          </button>
+        )}
         <button onClick={() => onEdit(row.item)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]">
           <Edit2 className="w-3.5 h-3.5" />
         </button>
@@ -4919,6 +4965,47 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
             </div>
           </>
         )}
+      </div>
+    )}
+    {cashFormOpen && (
+      <div className="bg-white border border-[#E3E7E4] rounded-lg px-3 py-2.5 -mt-1 space-y-2">
+        <p className="text-[11px] text-[#93999F]">
+          Maakt een nieuwe betaling aan (Bron: Cash-handmatig) en koppelt die meteen aan deze post.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="number" step="0.01"
+            value={cashAmount}
+            onChange={(e) => setCashAmount(e.target.value)}
+            placeholder="Bedrag"
+            className="flex-1 border border-[#E3E7E4] rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#12181F]"
+          />
+          <input
+            type="date"
+            value={cashDate}
+            onChange={(e) => setCashDate(e.target.value)}
+            className="flex-1 border border-[#E3E7E4] rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#12181F]"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={async () => {
+              const amt = Number(cashAmount);
+              if (!amt || !cashDate) return;
+              setCashSaving(true);
+              await onAddCashPayment(row.itemId, cashDate, amt);
+              setCashSaving(false);
+              setCashFormOpen(false);
+            }}
+            disabled={!cashAmount || !cashDate || cashSaving}
+            className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
+          >
+            {cashSaving ? "Bezig…" : "Cash-betaling toevoegen"}
+          </button>
+          <button onClick={() => setCashFormOpen(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
+            Annuleer
+          </button>
+        </div>
       </div>
     )}
     </>
