@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.26.0";
+const APP_VERSION = "2.26.1";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2642,20 +2642,33 @@ export default function CashflowPlanner() {
 
       // Bewaart het brondocument (UBL-XML of PDF) als bijlage op de post —
       // niet-blokkerend: als dit faalt, blijft de post zelf gewoon staan.
+      // Vercel-functies hebben een limiet van ~4,5 MB per request; base64
+      // vergroot een bestand met ~33%, dus we waarschuwen vooraf i.p.v. de
+      // upload gewoon (stil) te laten mislukken.
+      const MAX_ATTACHMENT_BYTES = 3.3 * 1024 * 1024; // ruim onder de ~4,5MB-limiet, na base64-opslag
       try {
         if (ublDraft.source === "UBL" && ublDraft.rawText) {
-          const base64 = textToBase64(ublDraft.rawText);
-          if (base64) {
-            await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.xml", "application/xml", base64);
+          if (ublDraft.rawText.length > MAX_ATTACHMENT_BYTES) {
+            setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage niet bewaard: XML-bestand is te groot.`);
+          } else {
+            const base64 = textToBase64(ublDraft.rawText);
+            if (base64) {
+              await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.xml", "application/xml", base64);
+            }
           }
         } else if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
-          const base64 = await fileToBase64(ublDraft.pdfFile);
-          if (base64) {
-            await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.pdf", "application/pdf", base64);
+          if (ublDraft.pdfFile.size > MAX_ATTACHMENT_BYTES) {
+            setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage niet bewaard: PDF is te groot (${(ublDraft.pdfFile.size / 1024 / 1024).toFixed(1)} MB).`);
+          } else {
+            const base64 = await fileToBase64(ublDraft.pdfFile);
+            if (base64) {
+              await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.pdf", "application/pdf", base64);
+            }
           }
         }
       } catch (attachErr) {
         console.error("Bijlage-upload mislukt (post blijft wel bestaan):", attachErr);
+        setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage bewaren mislukt: ${attachErr.message}`);
       }
 
       logAction(
