@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.26.1";
+const APP_VERSION = "2.27.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -434,6 +434,7 @@ function itemFromRecord(r) {
       catch (e) { return []; }
     })(),
     invoiceFiles: (r.fields.Factuurbestand || []).map((a) => ({ id: a.id, url: a.url, filename: a.filename })),
+    invoiceLink: r.fields.FactuurLink || "",
   };
 }
 function itemToFields(item) {
@@ -2640,35 +2641,34 @@ export default function CashflowPlanner() {
       }
       markSynced();
 
-      // Bewaart het brondocument (UBL-XML of PDF) als bijlage op de post —
-      // niet-blokkerend: als dit faalt, blijft de post zelf gewoon staan.
-      // Vercel-functies hebben een limiet van ~4,5 MB per request; base64
-      // vergroot een bestand met ~33%, dus we waarschuwen vooraf i.p.v. de
-      // upload gewoon (stil) te laten mislukken.
-      const MAX_ATTACHMENT_BYTES = 3.3 * 1024 * 1024; // ruim onder de ~4,5MB-limiet, na base64-opslag
+      // Bewaart het brondocument (UBL-XML of PDF) op Dropbox en slaat de
+      // deel-link op de post op — i.p.v. als Airtable-bijlage (die tegen
+      // Vercel's ~4,5MB request-limiet aanliep bij grotere gescande PDF's).
+      // Niet-blokkerend: als dit faalt, blijft de post zelf gewoon staan.
       try {
+        let fileForUpload = null;
+        let filename = ublDraft.fileName || "factuur";
         if (ublDraft.source === "UBL" && ublDraft.rawText) {
-          if (ublDraft.rawText.length > MAX_ATTACHMENT_BYTES) {
-            setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage niet bewaard: XML-bestand is te groot.`);
-          } else {
-            const base64 = textToBase64(ublDraft.rawText);
-            if (base64) {
-              await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.xml", "application/xml", base64);
-            }
-          }
+          fileForUpload = textToBase64(ublDraft.rawText);
         } else if (ublDraft.source === "PDF" && ublDraft.pdfFile) {
-          if (ublDraft.pdfFile.size > MAX_ATTACHMENT_BYTES) {
-            setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage niet bewaard: PDF is te groot (${(ublDraft.pdfFile.size / 1024 / 1024).toFixed(1)} MB).`);
-          } else {
-            const base64 = await fileToBase64(ublDraft.pdfFile);
-            if (base64) {
-              await atUploadAttachment(created.id, "fldQd6IHxSQJVsm6y", ublDraft.fileName || "factuur.pdf", "application/pdf", base64);
-            }
+          fileForUpload = await fileToBase64(ublDraft.pdfFile);
+        }
+        if (fileForUpload) {
+          const uploadRes = await fetch("/api/upload-invoice-to-dropbox", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename, file: fileForUpload }),
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok || !uploadData.url) {
+            throw new Error(uploadData.error || `Upload mislukt (${uploadRes.status})`);
           }
+          await atUpdate(TABLES.items, [{ id: created.id, fields: { FactuurLink: uploadData.url } }]);
+          setItems((prev) => prev.map((i) => (i.id === created.id ? { ...i, invoiceLink: uploadData.url } : i)));
         }
       } catch (attachErr) {
-        console.error("Bijlage-upload mislukt (post blijft wel bestaan):", attachErr);
-        setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Bijlage bewaren mislukt: ${attachErr.message}`);
+        console.error("Factuur-upload naar Dropbox mislukt (post blijft wel bestaan):", attachErr);
+        setImportNotice((prev) => `${prev ? prev + " " : ""}⚠ Factuur bewaren op Dropbox mislukt: ${attachErr.message}`);
       }
 
       logAction(
@@ -8086,9 +8086,19 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           </div>
         )}
 
-        {type === "item" && (record.invoiceFiles || []).length > 0 && (
+        {type === "item" && ((record.invoiceFiles || []).length > 0 || record.invoiceLink) && (
           <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700 mb-1">Bewaarde factuur</p>
+            {record.invoiceLink && (
+              <a
+                href={record.invoiceLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-xs text-emerald-700 underline decoration-dotted truncate"
+              >
+                Bekijk op Dropbox
+              </a>
+            )}
             {record.invoiceFiles.map((f) => (
               <a
                 key={f.id}
