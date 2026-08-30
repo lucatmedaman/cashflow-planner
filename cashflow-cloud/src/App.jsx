@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.27.0";
+const APP_VERSION = "2.28.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2712,7 +2712,7 @@ export default function CashflowPlanner() {
   const ITEM_QUICK_FIELD_MAP = {
     description: "Omschrijving", amount: "Bedrag", direction: "Richting", dueDate: "Datum",
     payDate: "Betaaldatum", invoiceDate: "Factuurdatum", recurrence: "Herhaling", endDate: "Einddatum",
-    accountNumber: "Rekeningnummer", note: "Opmerking", categoryId: "Categorie",
+    accountNumber: "Rekeningnummer", note: "Opmerking", categoryId: "Categorie", invoiceLink: "FactuurLink",
   };
   async function updateItemQuickField(id, key, value) {
     const airtableField = ITEM_QUICK_FIELD_MAP[key];
@@ -8002,6 +8002,36 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
     if (type === "item") onUpdateItemField(record.id, field, value);
     else onUpdatePaymentField(record.id, field, value);
   }
+  const [invoiceUploading, setInvoiceUploading] = useState(false);
+  const [invoiceUploadError, setInvoiceUploadError] = useState("");
+  const invoiceFileInputRef = useRef(null);
+  async function handleInvoiceFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setInvoiceUploading(true);
+    setInvoiceUploadError("");
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/upload-invoice-to-dropbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, file: base64 }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data.error || `Upload mislukt (${res.status})`);
+      updateField("invoiceLink", data.url);
+    } catch (err) {
+      setInvoiceUploadError(err.message);
+    } finally {
+      setInvoiceUploading(false);
+    }
+  }
   function EditableField({ label, field, type: inputType = "text", options, copyable }) {
     const [local, setLocal] = useState(record[field] ?? "");
     const [copied, setCopied] = useState(false);
@@ -8086,7 +8116,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
           </div>
         )}
 
-        {type === "item" && ((record.invoiceFiles || []).length > 0 || record.invoiceLink) && (
+        {type === "item" && (
           <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700 mb-1">Bewaarde factuur</p>
             {record.invoiceLink && (
@@ -8099,7 +8129,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 Bekijk op Dropbox
               </a>
             )}
-            {record.invoiceFiles.map((f) => (
+            {(record.invoiceFiles || []).map((f) => (
               <a
                 key={f.id}
                 href={f.url}
@@ -8110,6 +8140,19 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 {f.filename || "Bekijk bestand"}
               </a>
             ))}
+            {!record.invoiceLink && (record.invoiceFiles || []).length === 0 && (
+              <p className="text-xs text-slate-400 mb-1">Nog geen bestand bewaard.</p>
+            )}
+            <input ref={invoiceFileInputRef} type="file" accept=".pdf,.xml" className="hidden" onChange={handleInvoiceFileSelected} />
+            <button
+              type="button"
+              onClick={() => invoiceFileInputRef.current?.click()}
+              disabled={invoiceUploading}
+              className="text-xs text-emerald-700 underline decoration-dotted mt-1 disabled:opacity-40"
+            >
+              {invoiceUploading ? "Bezig met uploaden…" : record.invoiceLink ? "Vervang bestand…" : "Factuur toevoegen…"}
+            </button>
+            {invoiceUploadError && <p className="text-xs text-rose-600 mt-1">⚠ {invoiceUploadError}</p>}
           </div>
         )}
 
