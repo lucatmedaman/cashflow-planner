@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.28.0";
+const APP_VERSION = "2.29.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -2979,6 +2979,7 @@ export default function CashflowPlanner() {
       }
     } catch (err) {
       setAirtableError(err.message);
+      throw err;
     }
   }
 
@@ -4060,6 +4061,7 @@ export default function CashflowPlanner() {
             onCounterpartyClick={goToCounterparty}
             onResolveCounterparty={resolveCounterpartyId}
             onBulkAssignCounterparty={bulkAssignCounterparty}
+            onMergeCounterparties={mergeCounterparties}
             onMergePayments={mergePayments}
             directionFilter={directionFilter}
             setDirectionFilter={setDirectionFilter}
@@ -6492,6 +6494,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
   const [mergingFor, setMergingFor] = useState(null);
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState("");
   const [relinkingId, setRelinkingId] = useState(null);
   const [relinkTargetId, setRelinkTargetId] = useState("");
   const [linkingItemId, setLinkingItemId] = useState(null);
@@ -7108,19 +7111,25 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         onClick={async () => {
                           if (!mergeTargetId) return;
                           setMerging(true);
-                          await onMergeCounterparties(counterparty.id, mergeTargetId);
-                          setMerging(false);
-                          setMergingFor(null);
+                          try {
+                            await onMergeCounterparties(counterparty.id, mergeTargetId);
+                            setMergingFor(null);
+                          } catch (err) {
+                            setMergeError(err.message);
+                          } finally {
+                            setMerging(false);
+                          }
                         }}
                         disabled={!mergeTargetId || merging}
                         className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
                       >
                         {merging ? "Bezig…" : "Bevestig samenvoegen"}
                       </button>
-                      <button type="button" onClick={() => setMergingFor(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                      <button type="button" onClick={() => { setMergingFor(null); setMergeError(""); }} className="px-3 rounded-lg border border-slate-200 text-xs">
                         Annuleer
                       </button>
                     </div>
+                    {mergeError && <p className="text-[11px] text-rose-600">{mergeError}</p>}
                   </div>
                 )}
                 {!isCollapsed && (
@@ -7328,20 +7337,26 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                         onClick={async () => {
                           if (!mergeTargetId) return;
                           setMerging(true);
-                          await onMergeCounterparties(counterparty.id, mergeTargetId);
-                          setMerging(false);
-                          setMergingFor(null);
-                          if (openId === counterparty.id) setOpenId(null);
+                          try {
+                            await onMergeCounterparties(counterparty.id, mergeTargetId);
+                            setMergingFor(null);
+                            if (openId === counterparty.id) setOpenId(null);
+                          } catch (err) {
+                            setMergeError(err.message);
+                          } finally {
+                            setMerging(false);
+                          }
                         }}
                         disabled={!mergeTargetId || merging}
                         className="flex-1 bg-rose-600 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
                       >
                         {merging ? "Bezig…" : "Bevestig samenvoegen"}
                       </button>
-                      <button type="button" onClick={() => setMergingFor(null)} className="px-3 rounded-lg border border-slate-200 text-xs">
+                      <button type="button" onClick={() => { setMergingFor(null); setMergeError(""); }} className="px-3 rounded-lg border border-slate-200 text-xs">
                         Annuleer
                       </button>
                     </div>
+                    {mergeError && <p className="text-[11px] text-rose-600">{mergeError}</p>}
                   </div>
                 )}
                 {editDetailsFor === counterparty.id && (
@@ -8491,12 +8506,16 @@ function PaymentMergeTargetPicker({ payments, excludeId, entityById, value, onCh
   );
 }
 
-function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty, onMergePayments, directionFilter, setDirectionFilter }) {
+function BetalingenView({ payments, entityById, counterpartyById, counterparties, filteredEntityIds, categories, projects, onOpenDetail, onDeletePayment, onCounterpartyClick, onOpenRecurringDraft, onResolveCounterparty, onBulkAssignCounterparty, onMergeCounterparties, onMergePayments, directionFilter, setDirectionFilter }) {
   const [statusFilter, setStatusFilter] = useState("all"); // all | linked | unlinked | nodoc
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkCounterparty, setBulkCounterparty] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [showBulkMergePicker, setShowBulkMergePicker] = useState(false);
+  const [bulkMergeTargetName, setBulkMergeTargetName] = useState("");
+  const [bulkMerging, setBulkMerging] = useState(false);
+  const [bulkMergeError, setBulkMergeError] = useState("");
   // Rij-per-rij toewijzing: sneller dan bulk-selecteren wanneer elke
   // ongekoppelde betaling een andere crediteur nodig heeft.
   const [inlineAssignInputs, setInlineAssignInputs] = useState({}); // paymentId -> tekst
@@ -8584,6 +8603,15 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
   };
   const totalIn = filtered.filter((p) => p.direction === "in").reduce((s, p) => s + p.amount, 0);
   const totalUit = filtered.filter((p) => p.direction === "uit").reduce((s, p) => s + p.amount, 0);
+
+  // "Samenvoegen met…" heeft enkel zin als de geselecteerde betalingen
+  // allemaal aan dezelfde crediteur hangen — dat is dan de crediteur die
+  // samengevoegd wordt met een andere, niet de betalingen/posten zelf (dat
+  // is een apart mechanisme, zie onMergePayments hierboven per rij).
+  const selectedCounterpartyIds = [...new Set(
+    payments.filter((p) => selectedIds.has(p.id) && p.counterpartyId).map((p) => p.counterpartyId)
+  )];
+  const selectedCounterparty = selectedCounterpartyIds.length === 1 ? counterpartyById[selectedCounterpartyIds[0]] : null;
 
   const FILTERS = [
     { key: "all", label: "Alle" },
@@ -8720,6 +8748,66 @@ function BetalingenView({ payments, entityById, counterpartyById, counterparties
             </button>
           </div>
           {bulkError && <p className="text-[11px] text-rose-600">{bulkError}</p>}
+
+          <div className="border-t border-slate-200 pt-2">
+            {selectedCounterparty ? (
+              <>
+                <button
+                  onClick={() => { setShowBulkMergePicker((s) => !s); setBulkMergeTargetName(""); setBulkMergeError(""); }}
+                  className="text-[11px] text-slate-500 underline decoration-dotted"
+                >
+                  {showBulkMergePicker ? "Sluiten" : `Crediteur "${selectedCounterparty.name}" samenvoegen met…`}
+                </button>
+                {showBulkMergePicker && (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-[11px] text-slate-500">
+                      Verhuist <b>alle</b> posten en betalingen van "{selectedCounterparty.name}" (niet enkel de geselecteerde) naar de gekozen crediteur, en verwijdert "{selectedCounterparty.name}" nadien. Dit kan niet ongedaan gemaakt worden.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <CounterpartyAutocomplete
+                        value={bulkMergeTargetName}
+                        onChange={(v) => { setBulkMergeTargetName(v); setBulkMergeError(""); }}
+                        counterparties={(counterparties || []).filter((c) => c.id !== selectedCounterparty.id)}
+                        placeholder="Doel-crediteur…"
+                        className="flex-1"
+                        inputClassName="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-slate-400"
+                      />
+                      <button
+                        onClick={async () => {
+                          const target = (counterparties || []).find(
+                            (c) => c.name.trim().toLowerCase() === bulkMergeTargetName.trim().toLowerCase() && c.id !== selectedCounterparty.id
+                          );
+                          if (!target) { setBulkMergeError("Kies een bestaande crediteur uit de lijst."); return; }
+                          setBulkMerging(true);
+                          try {
+                            await onMergeCounterparties(selectedCounterparty.id, target.id);
+                            setShowBulkMergePicker(false);
+                            setBulkMergeTargetName("");
+                            setSelectedIds(new Set());
+                          } catch (err) {
+                            setBulkMergeError(`Samenvoegen mislukt: ${err.message}`);
+                          } finally {
+                            setBulkMerging(false);
+                          }
+                        }}
+                        disabled={!bulkMergeTargetName.trim() || bulkMerging}
+                        className="text-xs bg-rose-600 text-white rounded-lg px-3 py-1.5 shrink-0 disabled:opacity-40"
+                      >
+                        {bulkMerging ? "Bezig…" : "Bevestig samenvoegen"}
+                      </button>
+                    </div>
+                    {bulkMergeError && <p className="text-[11px] text-rose-600">{bulkMergeError}</p>}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                {selectedCounterpartyIds.length > 1
+                  ? "Selectie bevat meerdere verschillende crediteuren — samenvoegen kan enkel als alle geselecteerde betalingen dezelfde crediteur hebben."
+                  : "Selecteer betalingen van één crediteur om die te kunnen samenvoegen met een andere."}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
