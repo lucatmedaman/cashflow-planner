@@ -5111,7 +5111,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
             disabled={!cashAmount || !cashDate || cashSaving}
             className="flex-1 bg-slate-900 text-white rounded-lg py-1.5 text-xs font-medium disabled:opacity-40"
           >
-            {cashSaving ? "Bezig…" : "Cash-betaling toevoegen"}
+            {cashSaving ? "Bezig…" : cashSource === "Uit-te-klaren" ? "Uit te klaren betaling toevoegen" : "Cash-betaling toevoegen"}
           </button>
           <button onClick={() => setCashFormOpen(false)} className="px-3 rounded-lg border border-slate-200 text-xs">
             Annuleer
