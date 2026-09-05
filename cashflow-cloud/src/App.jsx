@@ -11,7 +11,7 @@ import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } f
 
 // Verhoog dit bij elke inhoudelijke update, zodat je in de app zelf kan zien
 // of je de nieuwste versie effectief live hebt staan.
-const APP_VERSION = "2.29.0";
+const APP_VERSION = "2.30.0";
 const VIEW_LABELS = {
   planning: "Planning",
   budget: "Budget",
@@ -133,10 +133,12 @@ function generateOccurrences(item, rangeStart, rangeEnd) {
 
   let cursor = new Date(start);
   let guard = 0;
+  const skipped = new Set(item.skippedOccurrences || []);
   while (cursor <= re && guard < 6000) {
     guard++;
     if (hardEnd && cursor > hardEnd) break;
-    if (cursor >= rs) occurrences.push({ date: toISO(cursor) });
+    const iso = toISO(cursor);
+    if (cursor >= rs && !skipped.has(iso)) occurrences.push({ date: iso });
     cursor = step(cursor);
   }
   return occurrences;
@@ -431,6 +433,10 @@ function itemFromRecord(r) {
     priority: r.fields.Prioriteit || "",
     hiddenOccurrences: (() => {
       try { return r.fields.VerborgenTotKoppeling ? JSON.parse(r.fields.VerborgenTotKoppeling) : []; }
+      catch (e) { return []; }
+    })(),
+    skippedOccurrences: (() => {
+      try { return r.fields.OvergeslagenOccurrences ? JSON.parse(r.fields.OvergeslagenOccurrences) : []; }
       catch (e) { return []; }
     })(),
     invoiceFiles: (r.fields.Factuurbestand || []).map((a) => ({ id: a.id, url: a.url, filename: a.filename })),
@@ -3161,6 +3167,71 @@ export default function CashflowPlanner() {
     }
   }
 
+  // Maakt van één occurrence van een herhalende post een eigen, volledig
+  // los bewerkbare eenmalige post — inclusief vervaldatum/betaaldatum, die
+  // op de herhalende post zelf altijd de vaste ankerdatum blijven (zie de
+  // banner in het detailscherm). De originele reeks slaat deze datum
+  // voortaan over (OvergeslagenOccurrences), zodat er geen dubbele post
+  // ontstaat. Een eventueel al gekoppelde betaling voor déze occurrence
+  // verhuist mee naar de nieuwe post.
+  async function detachOccurrenceAsPost(item, occurrenceDate) {
+    try {
+      const paidMap = occurrencePaymentMap(item, paymentsById);
+      const matchedPayment = paidMap.get(occurrenceDate) || null;
+
+      const draftFields = itemToFields({
+        description: item.description,
+        entityId: item.entityId,
+        counterpartyId: item.counterpartyId,
+        accountNumber: item.accountNumber,
+        note: item.note,
+        amount: item.amount,
+        direction: item.direction,
+        dueDate: occurrenceDate,
+        payDate: occurrenceDate,
+        invoiceDate: null,
+        recurrence: "once",
+        endDate: null,
+        viaPaypal: item.viaPaypal,
+        source: item.source,
+        bankRef: "",
+        bankSnapshot: "",
+        read: false,
+        categoryId: item.categoryId,
+        projectId: item.projectId,
+        priority: item.priority,
+      });
+      const [newRec] = await atCreate(TABLES.items, [{ fields: draftFields }]);
+      const newItem = itemFromRecord(newRec);
+
+      const nextSkipped = Array.from(new Set([...(item.skippedOccurrences || []), occurrenceDate]));
+      await atUpdate(TABLES.items, [{ id: item.id, fields: { OvergeslagenOccurrences: JSON.stringify(nextSkipped) } }]);
+
+      let updatedNewItem = newItem;
+      if (matchedPayment) {
+        const newDocIds = [...(matchedPayment.documentIds || []).filter((id) => id !== item.id), newItem.id];
+        await atUpdate(TABLES.payments, [{
+          id: matchedPayment.id,
+          fields: { GekoppeldeDocumenten: newDocIds, GekoppeldeOccurrence: null },
+        }]);
+        setPayments((prev) => prev.map((p) => (p.id === matchedPayment.id ? { ...p, documentIds: newDocIds, pinnedOccurrence: null } : p)));
+        updatedNewItem = { ...newItem, paymentIds: [matchedPayment.id] };
+      }
+
+      setItems((prev) => [
+        ...prev.map((i) => (i.id === item.id
+          ? { ...i, skippedOccurrences: nextSkipped, paymentIds: matchedPayment ? (i.paymentIds || []).filter((id) => id !== matchedPayment.id) : i.paymentIds }
+          : i)),
+        updatedNewItem,
+      ]);
+      markSynced();
+      return updatedNewItem;
+    } catch (err) {
+      setAirtableError(err.message);
+      return null;
+    }
+  }
+
   // Aparte functie t.o.v. markOccurrencePaid: hier kan het bedrag afwijken
   // van het factuurbedrag (contante betalingen zijn soms afgerond, gedeeltelijk,
   // of anderszins net niet gelijk aan wat er op de post staat).
@@ -4744,6 +4815,10 @@ export default function CashflowPlanner() {
           onUpdateItemField={updateItemQuickField}
           onUpdatePaymentField={updatePaymentQuickField}
           onToggleNoDocNeeded={toggleNoDocumentNeeded}
+          onDetachOccurrence={async (item, occurrenceDate) => {
+            const newItem = await detachOccurrenceAsPost(item, occurrenceDate);
+            if (newItem) setDetailTarget({ type: "item", id: newItem.id });
+          }}
         />
       )}
 
@@ -7950,7 +8025,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
 // Toont ook de wederzijdse koppeling(en) met doorklikbare cross-referenties,
 // zodat je zonder tabwissel van een betaling naar het document kan springen
 // (of omgekeerd), inclusief ontkoppel-actie.
-function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onTogglePaid, onToggleHidden }) {
+function DetailModal({ target, items, payments, entityById, counterpartyById, counterparties, categories, projects, onClose, onOpenDetail, onEditItem, onDeleteItem, onUnlinkPayment, onLinkPayment, onDeletePayment, onResolveCounterparty, onUpdatePaymentCounterparty, onUpdateItemCounterparty, onCounterpartyClick, onUpdateItemField, onUpdatePaymentField, onToggleNoDocNeeded, onTogglePaid, onToggleHidden, onDetachOccurrence }) {
   const { type, id } = target;
   const record = type === "item" ? items.find((i) => i.id === id) : payments.find((p) => p.id === id);
 
@@ -7969,6 +8044,7 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
   const category = record.categoryId ? (categories || []).find((c) => c.id === record.categoryId) : null;
   const project = record.projectId ? (projects || []).find((p) => p.id === record.projectId) : null;
   const [counterpartyInput, setCounterpartyInput] = useState("");
+  const [detaching, setDetaching] = useState(false);
   const [savingCounterparty, setSavingCounterparty] = useState(false);
   const [showLinkDoc, setShowLinkDoc] = useState(false);
   const [chosenDocId, setChosenDocId] = useState("");
@@ -8126,6 +8202,22 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
                 className="mt-1.5 text-xs text-sky-700 underline decoration-dotted"
               >
                 Betaling voor déze occurrence koppelen/loskoppelen…
+              </button>
+            )}
+            {onDetachOccurrence && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm(
+                    `Vervaldatum/betaaldatum van déze occurrence (${target.occurrenceDate}) apart wijzigen? Dit maakt er een eigen, eenmalige post van — de rest van de herhalende reeks blijft ongewijzigd op ${record.dueDate}.`
+                  )) return;
+                  setDetaching(true);
+                  await onDetachOccurrence(record, target.occurrenceDate);
+                  setDetaching(false);
+                }}
+                disabled={detaching}
+                className="mt-1.5 block text-xs text-sky-700 underline decoration-dotted disabled:opacity-40"
+              >
+                {detaching ? "Bezig…" : "Vervaldatum/betaaldatum van déze occurrence apart wijzigen…"}
               </button>
             )}
           </div>
