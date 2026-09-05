@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Building2, ChevronDown, X, Edit2, Copy,
   TrendingUp, TrendingDown, RotateCcw, AlertCircle,
-  Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText, ArrowUpDown
+  Download, Upload, Loader2, RefreshCw, Landmark, Link2, Eye, FileText, ArrowUpDown, Clock
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer } from "recharts";
 import { TABLES, atListAll, atCreate, atUpdate, atDelete, atUploadAttachment } from "./airtable";
@@ -3235,7 +3235,7 @@ export default function CashflowPlanner() {
   // Aparte functie t.o.v. markOccurrencePaid: hier kan het bedrag afwijken
   // van het factuurbedrag (contante betalingen zijn soms afgerond, gedeeltelijk,
   // of anderszins net niet gelijk aan wat er op de post staat).
-  async function addCashPayment(itemId, date, amount) {
+  async function addCashPayment(itemId, date, amount, source = "Cash-handmatig") {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
     try {
@@ -3245,7 +3245,7 @@ export default function CashflowPlanner() {
         amount,
         direction: item.direction,
         entityId: item.entityId,
-        source: "Cash-handmatig",
+        source,
         categoryId: item.categoryId,
         projectId: item.projectId,
         counterpartyId: item.counterpartyId,
@@ -4845,6 +4845,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
   const isIn = row.item.direction === "in";
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [cashFormOpen, setCashFormOpen] = useState(false);
+  const [cashSource, setCashSource] = useState("Cash-handmatig"); // "Cash-handmatig" | "Uit-te-klaren"
   const [cashAmount, setCashAmount] = useState(row.item.amount);
   const [cashDate, setCashDate] = useState(row.date);
   const [cashSaving, setCashSaving] = useState(false);
@@ -4939,15 +4940,24 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
               const linkedPayment = (payments || []).find((p) => p.id === pid);
               return (
                 <div key={pid} className="flex items-center gap-1.5 text-[11px]">
-                  <Link2 className="w-3 h-3 text-[#1E8E5A] shrink-0" />
+                  {linkedPayment?.source === "Uit-te-klaren" ? (
+                    <Clock className="w-3 h-3 text-[#B3762C] shrink-0" />
+                  ) : (
+                    <Link2 className="w-3 h-3 text-[#1E8E5A] shrink-0" />
+                  )}
                   <button
                     onClick={(e) => { e.stopPropagation(); onOpenDetail?.("payment", pid); }}
-                    className="text-[#1E8E5A] truncate underline decoration-dotted text-left"
+                    className={`truncate underline decoration-dotted text-left ${linkedPayment?.source === "Uit-te-klaren" ? "text-[#B3762C]" : "text-[#1E8E5A]"}`}
                   >
                     {linkedPayment
                       ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
                       : "(betaling niet gevonden)"}
                   </button>
+                  {linkedPayment?.source === "Uit-te-klaren" && (
+                    <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#B3762C] bg-[#FBF0DF] rounded px-1.5 py-0.5 shrink-0">
+                      uit te klaren
+                    </span>
+                  )}
                   {linkedPayment && onUnlinkPayment && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onUnlinkPayment(linkedPayment, row.itemId); }}
@@ -4996,11 +5006,20 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
         )}
         {paymentIds.length === 0 && !row.paid && onTogglePaid && (
           <button
-            onClick={() => { setCashFormOpen((s) => !s); setCashAmount(row.item.amount); setCashDate(row.date); }}
+            onClick={() => { setCashSource("Cash-handmatig"); setCashFormOpen((s) => (s && cashSource === "Cash-handmatig" ? !s : true)); setCashAmount(row.item.amount); setCashDate(row.date); }}
             className="p-1 text-[10px] text-[#C7CCC9] hover:text-[#12181F] underline decoration-dotted"
             title="Contante betaling toevoegen — voor als er geen bankuittreksel voor komt"
           >
             cash
+          </button>
+        )}
+        {paymentIds.length === 0 && !row.paid && onTogglePaid && (
+          <button
+            onClick={() => { setCashSource("Uit-te-klaren"); setCashFormOpen((s) => (s && cashSource === "Uit-te-klaren" ? !s : true)); setCashAmount(row.item.amount); setCashDate(row.date); }}
+            className="p-1 text-[10px] text-[#B3762C] hover:text-[#12181F] underline decoration-dotted"
+            title="Betaald, maar moeilijk te koppelen aan een bank-transactie — markeert als 'uit te klaren' tot je de echte betaling kan koppelen"
+          >
+            uit te klaren
           </button>
         )}
         <button onClick={() => onEdit(row.item)} className="p-1 text-[#C7CCC9] hover:text-[#12181F]">
@@ -5060,7 +5079,9 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
     {cashFormOpen && (
       <div className="bg-white border border-[#E3E7E4] rounded-lg px-3 py-2.5 -mt-1 space-y-2">
         <p className="text-[11px] text-[#93999F]">
-          Maakt een nieuwe betaling aan (Bron: Cash-handmatig) en koppelt die meteen aan deze post.
+          {cashSource === "Uit-te-klaren"
+            ? "Maakt een nieuwe betaling aan (Bron: Uit-te-klaren) en koppelt die meteen aan deze post. Later te herkoppelen aan de echte bank-transactie via Koppelen."
+            : "Maakt een nieuwe betaling aan (Bron: Cash-handmatig) en koppelt die meteen aan deze post."}
         </p>
         <div className="flex gap-2">
           <input
@@ -5083,7 +5104,7 @@ function ItemRow({ row, entity, counterparty, onTogglePaid, onEdit, onDelete, on
               const amt = Number(cashAmount);
               if (!amt || !cashDate) return;
               setCashSaving(true);
-              await onAddCashPayment(row.itemId, cashDate, amt);
+              await onAddCashPayment(row.itemId, cashDate, amt, cashSource);
               setCashSaving(false);
               setCashFormOpen(false);
             }}
@@ -5693,6 +5714,7 @@ function KoppelenView({
   const [selection, setSelection] = useState(null); // { type: "payment" | "doc", id }
   const [pendingLink, setPendingLink] = useState(null); // { payment, doc } — wacht op bevestiging
   const [showLinked, setShowLinked] = useState(false);
+  const [onlyUitTeKlaren, setOnlyUitTeKlaren] = useState(false);
   const [showUnlinkedPayments, setShowUnlinkedPayments] = useState(true);
   const [showUnlinkedDocs, setShowUnlinkedDocs] = useState(true);
   const [showNewPayment, setShowNewPayment] = useState(false);
@@ -5736,9 +5758,13 @@ function KoppelenView({
       return docSortDir === "asc" ? cmp : -cmp;
     });
 
-  const linkedPayments = payments
+  const linkedPaymentsAll = payments
     .filter((p) => filteredEntityIds.includes(p.entityId) && (p.documentIds || []).length > 0)
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const uitTeKlarenCount = linkedPaymentsAll.filter((p) => p.source === "Uit-te-klaren").length;
+  const linkedPayments = onlyUitTeKlaren
+    ? linkedPaymentsAll.filter((p) => p.source === "Uit-te-klaren")
+    : linkedPaymentsAll;
 
   const selectedPayment = selection?.type === "payment" ? unlinkedPayments.find((p) => p.id === selection.id) || null : null;
   const selectedDoc = selection?.type === "doc" ? unlinkedDocs.find((d) => d.id === selection.id) || null : null;
@@ -6069,11 +6095,25 @@ function KoppelenView({
           onClick={() => setShowLinked((s) => !s)}
           className="w-full flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3.5 py-3"
         >
-          <p className="text-xs font-medium text-slate-500">Gekoppelde betalingen ({linkedPayments.length})</p>
+          <p className="text-xs font-medium text-slate-500">
+            Gekoppelde betalingen ({linkedPayments.length})
+            {uitTeKlarenCount > 0 && !onlyUitTeKlaren && (
+              <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-[#B3762C] bg-[#FBF0DF] rounded px-1.5 py-0.5">
+                {uitTeKlarenCount} uit te klaren
+              </span>
+            )}
+          </p>
           <ChevronDown className={`w-4 h-4 text-slate-300 transition-transform ${showLinked ? "rotate-180" : ""}`} />
         </button>
         {showLinked && (
-          <div className="bg-white border border-t-0 border-slate-200 rounded-b-xl divide-y divide-slate-50 -mt-px">
+          <div className="bg-white border border-t-0 border-slate-200 rounded-b-xl -mt-px">
+            {uitTeKlarenCount > 0 && (
+              <label className="flex items-center gap-1.5 px-3.5 py-2 text-[11px] text-slate-500 border-b border-slate-50">
+                <input type="checkbox" checked={onlyUitTeKlaren} onChange={(e) => setOnlyUitTeKlaren(e.target.checked)} />
+                Toon enkel "uit te klaren" ({uitTeKlarenCount})
+              </label>
+            )}
+            <div className="divide-y divide-slate-50">
             {linkedPayments.length === 0 ? (
               <p className="text-xs text-slate-400 text-center py-4">Nog geen koppelingen.</p>
             ) : (
@@ -6090,6 +6130,11 @@ function KoppelenView({
                         >
                           {p.description}
                         </button>
+                        {p.source === "Uit-te-klaren" && (
+                          <span className="ml-1.5 text-[9.5px] font-semibold uppercase tracking-wide text-[#B3762C] bg-[#FBF0DF] rounded px-1.5 py-0.5">
+                            uit te klaren
+                          </span>
+                        )}
                         {cp && (
                           <button
                             onClick={() => onCounterpartyClick?.(cp.id)}
@@ -6135,6 +6180,7 @@ function KoppelenView({
                 );
               })
             )}
+            </div>
           </div>
         )}
       </div>
@@ -8414,12 +8460,19 @@ function DetailModal({ target, items, payments, entityById, counterpartyById, co
               const p = payments.find((pp) => pp.id === pid);
               return (
                 <div key={pid} className="flex items-center justify-between bg-slate-50 rounded-md px-2 py-1.5 mb-1">
-                  <button
-                    onClick={() => onOpenDetail("payment", pid)}
-                    className="text-xs text-slate-700 underline decoration-dotted text-left truncate"
-                  >
-                    {p ? `${p.description} · ${p.date} · ${eur(p.amount)}` : "(niet gevonden)"}
-                  </button>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      onClick={() => onOpenDetail("payment", pid)}
+                      className="text-xs text-slate-700 underline decoration-dotted text-left truncate"
+                    >
+                      {p ? `${p.description} · ${p.date} · ${eur(p.amount)}` : "(niet gevonden)"}
+                    </button>
+                    {p?.source === "Uit-te-klaren" && (
+                      <span className="text-[9.5px] font-semibold uppercase tracking-wide text-[#B3762C] bg-[#FBF0DF] rounded px-1.5 py-0.5 shrink-0">
+                        uit te klaren
+                      </span>
+                    )}
+                  </div>
                   {p && (
                     <button onClick={() => onUnlinkPayment(p, record.id)} className="text-[10px] text-rose-500 underline decoration-dotted shrink-0 ml-2">
                       ontkoppel
