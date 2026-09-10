@@ -267,7 +267,23 @@ export default async function handler(req, res) {
     const payableAmountRaw = extractTag(xml, "PayableAmount");
     const amount = payableAmountRaw ? Math.abs(parseFloat(payableAmountRaw)) : 0;
     if (!amount) {
-      await logFailureToAirtable("geen bedrag", `Kon geen bedrag (PayableAmount) uit UBL-factuur ${invoiceNumber} halen.`, targetEntityId, `entity=${entityKey}`);
+      // Diagnose: ID/IssueDate zaten wél vroeg in het document en lukten —
+      // PayableAmount staat in UBL doorgaans pas ná alle InvoiceLines, dus
+      // als de body halverwege afgekapt is (bv. door een grote ingesloten
+      // PDF-bijlage die de functielimiet raakt) zou net dít veld ontbreken
+      // terwijl ID wel werkte. Log daarom genoeg om dat te kunnen bevestigen
+      // bij een volgende mislukking, i.p.v. te gokken.
+      const trimmedEnd = xml.trim().slice(-60);
+      const looksTruncated = !/<\/[\w-]*:?Invoice>\s*$/i.test(xml.trim()) && !/<\/[\w-]*:?CreditNote>\s*$/i.test(xml.trim());
+      const diag = [
+        `rawlen=${rawXml.length}`,
+        `xmllen=${xml.length}`,
+        `heeftPayableAmountTekst=${xml.includes("PayableAmount")}`,
+        `heeftLegalMonetaryTotal=${xml.includes("LegalMonetaryTotal")}`,
+        `lijktAfgekapt=${looksTruncated}`,
+        `einde="${trimmedEnd.replace(/"/g, "'")}"`,
+      ].join(", ");
+      await logFailureToAirtable("geen bedrag", `Kon geen bedrag (PayableAmount) uit UBL-factuur ${invoiceNumber} halen.`, targetEntityId, `entity=${entityKey}, ${diag}`);
       res.status(422).json({ error: "Kon geen bedrag (PayableAmount) uit de UBL-factuur halen — niet aangemaakt." });
       return;
     }
