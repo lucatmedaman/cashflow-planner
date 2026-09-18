@@ -842,6 +842,7 @@ export default function CashflowPlanner() {
   const [showHiddenList, setShowHiddenList] = useState(false);
   const [showOverdue, setShowOverdue] = useState(false);
   const [expandedDates, setExpandedDates] = useState(() => new Set()); // datums die uitgeklapt zijn in Planning — default alles ingeklapt
+  const [planningFlatView, setPlanningFlatView] = useState(false); // true = platte lijst zonder datumgroepering/-kopjes in Planning
 
   const emptyForm = {
     entityId: "",
@@ -3868,6 +3869,16 @@ export default function CashflowPlanner() {
                   ))}
                 </select>
               )}
+              <span className="text-slate-200">·</span>
+              <button
+                onClick={() => setPlanningFlatView((v) => !v)}
+                className={`px-2.5 py-1 rounded-md border text-xs ${
+                  planningFlatView ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-500"
+                }`}
+                title="Wissel tussen gegroepeerd per datum en één platte lijst zonder datumkopjes"
+              >
+                {planningFlatView ? "Lijst" : "Gegroepeerd"}
+              </button>
             </div>
 
             {/* New-item form (trigger button now lives in the always-visible header) */}
@@ -3885,115 +3896,148 @@ export default function CashflowPlanner() {
               </div>
             )}
 
-            {overdueRows.length > 0 && (
-              <div className="mt-4 bg-rose-50 border border-rose-200 rounded-lg p-3">
-                <button
-                  onClick={() => setShowOverdue((s) => !s)}
-                  className="w-full flex items-center justify-between text-xs font-medium text-rose-700"
-                >
-                  <span className="flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> {overdueRows.length} openstaand en verlopen
-                  </span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showOverdue ? "rotate-180" : ""}`} />
-                </button>
-                {showOverdue && (
-                  <div className="space-y-1.5 mt-2">
-                    {overdueRows.map((r) => (
-                      <React.Fragment key={`${r.itemId}-${r.date}`}>
-                        <ItemRow row={r} entity={entityById[r.item.entityId]}
-                          counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
-                          onCounterpartyClick={goToCounterparty}
-                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
-                        {editingId === r.itemId && (
-                          <ItemForm
-                            form={form}
-                            setForm={setForm}
-                            entities={sortedEntities}
-                            counterparties={counterparties}
-                            onSubmit={submitForm}
-                            onCancel={resetForm}
-                            editing
-                          />
-                        )}
-                      </React.Fragment>
-                    ))}
+            {planningFlatView ? (
+              /* Platte lijst — geen datumgroepering/-kopjes, achterstallig + gepland in één doorlopende lijst */
+              <div className="mt-6 space-y-1.5">
+                {upcomingRows.length === 0 && (
+                  <p className="text-sm text-slate-400 text-center py-10">Niets gepland in deze periode.</p>
+                )}
+                {upcomingRows.map((r) => (
+                  <React.Fragment key={`${r.itemId}-${r.date}`}>
+                    <ItemRow row={r} entity={entityById[r.item.entityId]}
+                      counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
+                      onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                      overdue={r.displayDate < todayISO()} showDate
+                      onCounterpartyClick={goToCounterparty}
+                      payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                      onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
+                    {editingId === r.itemId && (
+                      <ItemForm
+                        form={form}
+                        setForm={setForm}
+                        entities={sortedEntities}
+                        counterparties={counterparties}
+                        onSubmit={submitForm}
+                        onCancel={resetForm}
+                        editing
+                      />
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            ) : (
+              <>
+                {overdueRows.length > 0 && (
+                  <div className="mt-4 bg-rose-50 border border-rose-200 rounded-lg p-3">
+                    <button
+                      onClick={() => setShowOverdue((s) => !s)}
+                      className="w-full flex items-center justify-between text-xs font-medium text-rose-700"
+                    >
+                      <span className="flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5" /> {overdueRows.length} openstaand en verlopen
+                      </span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showOverdue ? "rotate-180" : ""}`} />
+                    </button>
+                    {showOverdue && (
+                      <div className="space-y-1.5 mt-2">
+                        {overdueRows.map((r) => (
+                          <React.Fragment key={`${r.itemId}-${r.date}`}>
+                            <ItemRow row={r} entity={entityById[r.item.entityId]}
+                              counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
+                              onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem} overdue showDate
+                              onCounterpartyClick={goToCounterparty}
+                              payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                              onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
+                            {editingId === r.itemId && (
+                              <ItemForm
+                                form={form}
+                                setForm={setForm}
+                                entities={sortedEntities}
+                                counterparties={counterparties}
+                                onSubmit={submitForm}
+                                onCancel={resetForm}
+                                editing
+                              />
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Grouped list */}
-            <div className="mt-6 space-y-5">
-              {groupedByDate.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-10">Niets gepland in deze periode.</p>
-              )}
-              {groupedByDate.length > 0 && (
-                <div className="flex justify-end gap-3 text-[11px] text-slate-400 -mb-2">
-                  <button onClick={expandAllDates} className="hover:text-slate-600">Alles uitklappen</button>
-                  <span className="text-slate-200">·</span>
-                  <button onClick={collapseAllDates} className="hover:text-slate-600">Alles inklappen</button>
-                </div>
-              )}
-              {groupedByDate.map(([date, rows]) => {
-                const dateIn = rows.filter((r) => r.item.direction === "in").reduce((s, r) => s + Number(r.item.amount), 0);
-                const dateUit = rows.filter((r) => r.item.direction === "uit").reduce((s, r) => s + Number(r.item.amount), 0);
-                const dateNet = dateIn - dateUit;
-                const isExpanded = expandedDates.has(date);
-                return (
-                <div key={date}>
-                  <button
-                    onClick={() => toggleDateExpanded(date)}
-                    className="w-full flex items-baseline justify-between mb-1.5 text-left"
-                  >
-                    <span className="flex items-center gap-1">
-                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                      <span className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
-                        {formatDateLabel(date)}
-                      </span>
-                    </span>
-                    <span className="font-num text-xs font-medium shrink-0">
-                      <span className="text-[11px] text-slate-400 font-sans mr-1.5">{rows.length}×</span>
-                      {dateIn > 0 && dateUit > 0 && (
-                        <span className="text-[#93999F] font-normal mr-1.5">
-                          +{eur(dateIn)} / −{eur(dateUit)}
-                        </span>
-                      )}
-                      <span className={dateNet >= 0 ? "text-[#1E8E5A]" : "text-[#B3462C]"}>
-                        {dateNet >= 0 ? "+" : ""}{eur(dateNet)}
-                      </span>
-                    </span>
-                  </button>
-                  {isExpanded && (
-                  <div className="space-y-1.5">
-                    {rows.map((r) => (
-                      <React.Fragment key={`${r.itemId}-${r.date}`}>
-                        <ItemRow row={r} entity={entityById[r.item.entityId]}
-                          counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
-                          onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
-                          onCounterpartyClick={goToCounterparty}
-                          payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
-                          onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
-                        {editingId === r.itemId && (
-                          <ItemForm
-                            form={form}
-                            setForm={setForm}
-                            entities={sortedEntities}
-                            counterparties={counterparties}
-                            onSubmit={submitForm}
-                            onCancel={resetForm}
-                            editing
-                          />
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </div>
+                {/* Grouped list */}
+                <div className="mt-6 space-y-5">
+                  {groupedByDate.length === 0 && (
+                    <p className="text-sm text-slate-400 text-center py-10">Niets gepland in deze periode.</p>
                   )}
+                  {groupedByDate.length > 0 && (
+                    <div className="flex justify-end gap-3 text-[11px] text-slate-400 -mb-2">
+                      <button onClick={expandAllDates} className="hover:text-slate-600">Alles uitklappen</button>
+                      <span className="text-slate-200">·</span>
+                      <button onClick={collapseAllDates} className="hover:text-slate-600">Alles inklappen</button>
+                    </div>
+                  )}
+                  {groupedByDate.map(([date, rows]) => {
+                    const dateIn = rows.filter((r) => r.item.direction === "in").reduce((s, r) => s + Number(r.item.amount), 0);
+                    const dateUit = rows.filter((r) => r.item.direction === "uit").reduce((s, r) => s + Number(r.item.amount), 0);
+                    const dateNet = dateIn - dateUit;
+                    const isExpanded = expandedDates.has(date);
+                    return (
+                    <div key={date}>
+                      <button
+                        onClick={() => toggleDateExpanded(date)}
+                        className="w-full flex items-baseline justify-between mb-1.5 text-left"
+                      >
+                        <span className="flex items-center gap-1">
+                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                          <span className={`font-display italic text-[15px] ${date < todayISO() ? "text-[#B3462C] not-italic font-semibold" : "text-[#12181F]"}`}>
+                            {formatDateLabel(date)}
+                          </span>
+                        </span>
+                        <span className="font-num text-xs font-medium shrink-0">
+                          <span className="text-[11px] text-slate-400 font-sans mr-1.5">{rows.length}×</span>
+                          {dateIn > 0 && dateUit > 0 && (
+                            <span className="text-[#93999F] font-normal mr-1.5">
+                              +{eur(dateIn)} / −{eur(dateUit)}
+                            </span>
+                          )}
+                          <span className={dateNet >= 0 ? "text-[#1E8E5A]" : "text-[#B3462C]"}>
+                            {dateNet >= 0 ? "+" : ""}{eur(dateNet)}
+                          </span>
+                        </span>
+                      </button>
+                      {isExpanded && (
+                      <div className="space-y-1.5">
+                        {rows.map((r) => (
+                          <React.Fragment key={`${r.itemId}-${r.date}`}>
+                            <ItemRow row={r} entity={entityById[r.item.entityId]}
+                              counterparty={r.item.counterpartyId ? counterpartyById[r.item.counterpartyId] : null}
+                              onTogglePaid={markOccurrencePaid} onEdit={startEdit} onDelete={deleteItem} onDuplicate={duplicateItem}
+                              onCounterpartyClick={goToCounterparty}
+                              payments={payments} onLinkPayment={linkPaymentToDocument} onUnlinkPayment={unlinkPaymentFromDocument}
+                              onOpenDetail={openDetail} onToggleHidden={toggleOccurrenceHidden} onAddCashPayment={addCashPayment} />
+                            {editingId === r.itemId && (
+                              <ItemForm
+                                form={form}
+                                setForm={setForm}
+                                entities={sortedEntities}
+                                counterparties={counterparties}
+                                onSubmit={submitForm}
+                                onCancel={resetForm}
+                                editing
+                              />
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                      )}
+                    </div>
+                    );
+                  })}
                 </div>
-                );
-              })}
-            </div>
+              </>
+            )}
 
             {/* Paid history */}
             <div className="mt-6">
