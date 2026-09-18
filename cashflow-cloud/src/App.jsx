@@ -7735,7 +7735,7 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                                       className="text-emerald-700 truncate underline decoration-dotted text-left"
                                     >
                                       {linkedPayment
-                                        ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}`
+                                        ? `${linkedPayment.description} · ${linkedPayment.date} · ${eur(linkedPayment.amount)}${linkedPayment.volgnummer ? ` · Volgnr. ${linkedPayment.volgnummer}` : ""}`
                                         : "(betaling niet gevonden)"}
                                     </button>
                                     {linkedPayment && (
@@ -7950,7 +7950,10 @@ function CounterpartyView({ items, payments, counterparties, entities, entityByI
                                 </span>
                               </div>
                               <p className="text-sm truncate text-slate-800">{p.description}</p>
-                              <p className="text-[11px] text-slate-400 truncate">{p.source}</p>
+                              <p className="text-[11px] text-slate-400 truncate">
+                                {p.source}
+                                {p.volgnummer && ` · Volgnr. ${p.volgnummer}`}
+                              </p>
                             </div>
                             <p className={`text-sm font-medium shrink-0 ${isIn ? "text-emerald-600" : "text-rose-600"}`}>
                               {isIn ? "+" : "−"}{eur(p.amount)}
