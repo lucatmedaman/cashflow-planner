@@ -3523,6 +3523,21 @@ export default function CashflowPlanner() {
                       )}
                     </button>
                   ))}
+                  <div className="border-t border-[#E3E7E4] mt-1 pt-1">
+                    <button
+                      onClick={async () => {
+                        setShowViewMenu(false);
+                        try {
+                          await fetch("/api/session-logout", { method: "POST" });
+                        } finally {
+                          window.location.reload();
+                        }
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-[#B3462C] hover:bg-rose-50"
+                    >
+                      Uitloggen
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
